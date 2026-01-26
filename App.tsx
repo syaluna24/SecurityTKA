@@ -122,7 +122,6 @@ const App: React.FC = () => {
   const [securityBriefing, setSecurityBriefing] = useState<string>('');
 
   // Filters
-  const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [incidentFilterStatus, setIncidentFilterStatus] = useState<string>('ALL');
 
   // Sync with Local Storage
