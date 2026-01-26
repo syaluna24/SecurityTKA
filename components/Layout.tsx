@@ -12,7 +12,7 @@ import {
   MessageSquare,
   BookOpen
 } from 'lucide-react';
-import { User, ShiftType } from '../types';
+import { User, ShiftType } from '../types.ts';
 
 interface LayoutProps {
   user: User;

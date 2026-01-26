@@ -8,10 +8,12 @@ export interface User {
   avatar?: string;
 }
 
-export enum ShiftType {
-  MORNING = 'MORNING', // 07:00 - 19:00
-  NIGHT = 'NIGHT'     // 19:00 - 07:00
-}
+export const ShiftType = {
+  MORNING: 'MORNING', // 07:00 - 19:00
+  NIGHT: 'NIGHT'     // 19:00 - 07:00
+} as const;
+
+export type ShiftType = typeof ShiftType[keyof typeof ShiftType];
 
 export interface PatrolLog {
   id: string;

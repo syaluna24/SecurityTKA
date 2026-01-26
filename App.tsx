@@ -6,9 +6,9 @@ import {
   RESIDENT_USERS, 
   MOCK_RESIDENTS,
   CHECKPOINTS as INITIAL_CHECKPOINTS 
-} from './constants';
-import { User, PatrolLog, IncidentReport, Resident, AuditLog, ChatMessage, SecurityLocation, GuestLog } from './types';
-import Layout from './components/Layout';
+} from './constants.tsx';
+import { User, PatrolLog, IncidentReport, Resident, AuditLog, ChatMessage, SecurityLocation, GuestLog } from './types.ts';
+import Layout from './components/Layout.tsx';
 import { 
   Shield, 
   Search, 
@@ -45,7 +45,7 @@ import {
   Clock,
   Eye
 } from 'lucide-react';
-import { analyzeIncident, getSecurityBriefing, generateWeeklySummary } from './services/geminiService';
+import { analyzeIncident, getSecurityBriefing, generateWeeklySummary } from './services/geminiService.ts';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
 
 const App: React.FC = () => {
@@ -409,7 +409,6 @@ const App: React.FC = () => {
 
       {activeTab === 'incident' && (
         <div className="max-w-6xl mx-auto space-y-6 animate-in slide-in-from-top-4 duration-500 pb-20">
-          {/* Incident Form Section */}
           <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
             <div className="flex items-center gap-3 mb-6">
               <div className="w-12 h-12 bg-red-100 rounded-2xl flex items-center justify-center text-red-600">
@@ -470,7 +469,6 @@ const App: React.FC = () => {
             </form>
           </div>
 
-          {/* Incident List Header */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <h3 className="text-xl font-bold text-slate-800">Daftar Insiden Terkini</h3>
             <div className="flex gap-2 bg-white p-1.5 rounded-2xl shadow-sm border border-slate-100">
@@ -480,7 +478,6 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Incident Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {filteredIncidents.map(inc => (
               <div key={inc.id} className="bg-white border border-slate-100 rounded-3xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col">
@@ -544,7 +541,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Patrol Tab */}
       {activeTab === 'patrol' && (
         <div className="space-y-6 max-w-6xl mx-auto animate-in slide-in-from-bottom-4 duration-500">
           <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
@@ -622,9 +618,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* REUSABLE MODALS */}
-      
-      {/* Photo Preview Modal */}
       {previewImage && (
         <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in" onClick={() => setPreviewImage(null)}>
           <button className="absolute top-6 right-6 p-3 bg-white/10 text-white rounded-full"><X size={24}/></button>
@@ -632,7 +625,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Resident Detail Modal */}
       {selectedResidentInfo && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
@@ -648,7 +640,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* AI Analysis Overlay */}
       {aiAnalysis && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden">
@@ -662,7 +653,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Patrol Confirmation Modal */}
       {patrolActionState && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden">
@@ -682,7 +672,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Add Guest Modal */}
       {isAddGuestModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden">
@@ -705,7 +694,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Chat Tab Logic */}
       {activeTab === 'chat' && (
         <div className="max-w-4xl mx-auto h-[calc(100vh-180px)] bg-white rounded-3xl shadow-sm border border-slate-100 flex flex-col overflow-hidden animate-in fade-in">
           <div className="p-6 bg-slate-900 text-white flex items-center justify-between"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center text-slate-900"><MessageSquare size={20} /></div><h3 className="font-bold">Chat Keamanan Perumahan</h3></div></div>
@@ -729,7 +717,6 @@ const App: React.FC = () => {
           </form>
         </div>
       )}
-
     </Layout>
   );
 };
