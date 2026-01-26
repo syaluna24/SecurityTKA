@@ -1,0 +1,7 @@
+{
+  "name": "Sistem Keamanan Perumahan TKA",
+  "description": "Aplikasi manajemen satpam perumahan dengan fitur patroli, pelaporan insiden, pelacakan lokasi warga, dan analisis keamanan berbasis AI.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
