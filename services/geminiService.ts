@@ -1,12 +1,9 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Initialize the Google GenAI client using the API key from environment variables.
-// Following guidelines to use process.env.API_KEY directly in the constructor.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 export const analyzeIncident = async (description: string) => {
   try {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: `Analisis kejadian berikut di perumahan dan berikan saran langkah keamanan (dalam Bahasa Indonesia). Kejadian: ${description}`,
@@ -24,7 +21,6 @@ export const analyzeIncident = async (description: string) => {
       }
     });
 
-    // Directly access the text property as per guidelines (not a method).
     return JSON.parse(response.text || '{}');
   } catch (error) {
     console.error("Gemini Analysis Error:", error);
@@ -34,11 +30,11 @@ export const analyzeIncident = async (description: string) => {
 
 export const getSecurityBriefing = async (shift: string) => {
   try {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: `Berikan 3 poin briefing singkat dan profesional untuk satpam perumahan yang bertugas shift ${shift}. Fokus pada kewaspadaan dan pelayanan warga.`,
     });
-    // Directly access the text property.
     return response.text;
   } catch (error) {
     return "Tetap waspada dan layani warga dengan ramah.";
@@ -52,6 +48,7 @@ export const generateWeeklySummary = async (data: {
   averageOccupancy: number 
 }) => {
   try {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: `Buat ringkasan eksekutif profesional untuk laporan keamanan mingguan perumahan TKA berdasarkan data berikut:
@@ -62,7 +59,6 @@ export const generateWeeklySummary = async (data: {
       
       Gunakan nada yang menenangkan namun tetap waspada. Berikan saran strategis untuk minggu depan.`,
     });
-    // Directly access the text property.
     return response.text;
   } catch (error) {
     return "Laporan mingguan menunjukkan aktivitas keamanan berjalan normal dengan pengawasan rutin di seluruh area perumahan.";

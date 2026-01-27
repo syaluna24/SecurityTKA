@@ -389,7 +389,7 @@ const App: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {incidents.map(inc => (
+            {incidents.length > 0 ? incidents.map(inc => (
               <div key={inc.id} className="bg-white p-8 rounded-[3rem] shadow-sm border border-slate-100 hover:shadow-xl transition-all group">
                 <div className="flex justify-between items-start mb-6">
                   <div>
@@ -401,10 +401,20 @@ const App: React.FC = () => {
                 <p className="text-slate-600 text-sm leading-relaxed italic mb-8 line-clamp-3">"{inc.description}"</p>
                 <div className="flex justify-between items-center pt-6 border-t border-slate-50">
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Oleh: {inc.reporterName}</p>
-                  {inc.photo && <button onClick={() => setPreviewImage(inc.photo!)} className="p-3 bg-slate-50 text-slate-400 rounded-xl hover:bg-slate-900 hover:text-white transition-all"><Eye size={18}/></button>}
+                  <div className="flex gap-2">
+                    {inc.photo && <button onClick={() => setPreviewImage(inc.photo!)} className="p-3 bg-slate-50 text-slate-400 rounded-xl hover:bg-slate-900 hover:text-white transition-all"><Eye size={18}/></button>}
+                    {inc.status !== 'RESOLVED' && (currentUser.role === 'ADMIN' || currentUser.role === 'SECURITY') && (
+                      <button onClick={() => updateIncidentStatus(inc.id, 'RESOLVED')} className="p-3 bg-green-500 text-white rounded-xl shadow-lg hover:scale-110 active:scale-95 transition-all"><CheckCircle size={18}/></button>
+                    )}
+                  </div>
                 </div>
               </div>
-            ))}
+            )) : (
+              <div className="col-span-full py-20 bg-white rounded-[3rem] border-2 border-dashed border-slate-100 flex flex-col items-center justify-center text-slate-300">
+                <Shield size={64} className="mb-4 opacity-10" />
+                <p className="font-bold italic text-sm">Belum ada riwayat insiden keamanan.</p>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -420,7 +430,7 @@ const App: React.FC = () => {
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {guests.map(g => (
+              {guests.length > 0 ? guests.map(g => (
                 <div key={g.id} className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100 transition-all hover:bg-white hover:shadow-2xl group">
                   <div className="flex gap-5 mb-6">
                      <div className="w-14 h-14 rounded-2xl bg-white flex items-center justify-center font-black text-slate-400 border-2 border-slate-100 text-xl shadow-sm">{g.name.charAt(0)}</div>
@@ -441,10 +451,15 @@ const App: React.FC = () => {
                       Check Out Tamu
                     </button>
                   ) : (
-                    <div className="w-full py-4 bg-white border-2 border-dashed border-slate-200 text-center text-[10px] font-black text-slate-300 uppercase tracking-widest rounded-2xl">Selesai</div>
+                    <div className="w-full py-4 bg-white border-2 border-dashed border-slate-200 text-center text-[10px] font-black text-slate-300 uppercase tracking-widest rounded-2xl">Selesai Kunjungan</div>
                   )}
                 </div>
-              ))}
+              )) : (
+                <div className="col-span-full py-20 bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-300">
+                  <Users size={64} className="mb-4 opacity-10" />
+                  <p className="font-bold italic text-sm">Belum ada tamu terdaftar hari ini.</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -476,6 +491,29 @@ const App: React.FC = () => {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {activeTab === 'chat' && (
+        <div className="max-w-4xl mx-auto h-[calc(100vh-200px)] bg-white rounded-[3rem] shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in fade-in">
+          <div className="p-8 bg-slate-900 text-white flex items-center justify-between">
+            <h3 className="font-black text-xl tracking-tight">Komunikasi Warga & Keamanan</h3>
+          </div>
+          <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-slate-50/30 no-scrollbar">
+            {messages.map((msg) => (
+              <div key={msg.id} className={`flex ${msg.senderId === currentUser?.id ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] p-6 rounded-[2rem] shadow-sm ${msg.senderId === currentUser?.id ? 'bg-slate-900 text-white rounded-tr-none' : 'bg-white border border-slate-100 rounded-tl-none'}`}>
+                  <p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${msg.senderId === currentUser?.id ? 'text-amber-400' : 'text-slate-400'}`}>{msg.senderName} • {msg.senderRole}</p>
+                  <p className="text-sm font-medium leading-relaxed">{msg.text}</p>
+                </div>
+              </div>
+            ))}
+            <div ref={chatEndRef} />
+          </div>
+          <form onSubmit={(e) => { e.preventDefault(); if (!chatInput.trim()) return; setMessages([...messages, {id: Date.now().toString(), senderId: currentUser!.id, senderName: currentUser!.name, senderRole: currentUser!.role, text: chatInput, timestamp: new Date().toISOString()}]); setChatInput(''); }} className="p-6 bg-white border-t border-slate-100 flex gap-4">
+            <input type="text" placeholder="Ketik pesan..." className="flex-1 px-8 py-4 rounded-[2rem] bg-slate-50 border-2 border-transparent focus:border-amber-500 outline-none font-bold" value={chatInput} onChange={e => setChatInput(e.target.value)} />
+            <button type="submit" className="p-4 bg-slate-900 text-white rounded-[1.5rem] shadow-xl hover:scale-105 transition-all"><Send size={24}/></button>
+          </form>
         </div>
       )}
 
