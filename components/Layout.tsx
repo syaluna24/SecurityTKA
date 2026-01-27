@@ -12,7 +12,8 @@ import {
   MessageSquare,
   BookOpen,
   Menu,
-  X
+  X,
+  FileText
 } from 'lucide-react';
 import { User, ShiftType } from '../types.ts';
 
@@ -45,6 +46,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab
   const menuItems = [
     { id: 'dashboard', label: 'Home', icon: <Home size={20} />, roles: ['SECURITY', 'ADMIN', 'RESIDENT'] },
     { id: 'patrol', label: 'Patroli', icon: <ClipboardCheck size={20} />, roles: ['SECURITY', 'ADMIN'] },
+    { id: 'reports', label: 'Laporan', icon: <FileText size={20} />, roles: ['RESIDENT'] },
     { id: 'incident', label: 'Insiden', icon: <AlertTriangle size={20} />, roles: ['SECURITY', 'ADMIN', 'RESIDENT'] },
     { id: 'guests', label: 'Tamu', icon: <BookOpen size={20} />, roles: ['SECURITY', 'ADMIN'] },
     { id: 'residents', label: 'Warga', icon: <MapPin size={20} />, roles: ['SECURITY', 'ADMIN'] },

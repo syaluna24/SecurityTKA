@@ -1,11 +1,12 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
+// Analyze incident with advanced reasoning for severity and action planning
 export const analyzeIncident = async (description: string) => {
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3-pro-preview',
       contents: `Analisis kejadian berikut di perumahan dan berikan saran langkah keamanan (dalam Bahasa Indonesia). Kejadian: ${description}`,
       config: {
         responseMimeType: 'application/json',
@@ -28,6 +29,7 @@ export const analyzeIncident = async (description: string) => {
   }
 };
 
+// Simple Q&A style briefing for security personnel
 export const getSecurityBriefing = async (shift: string) => {
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -41,6 +43,7 @@ export const getSecurityBriefing = async (shift: string) => {
   }
 };
 
+// Summarization task for executive reports
 export const generateWeeklySummary = async (data: { 
   totalPatrols: number, 
   totalIncidents: number, 
