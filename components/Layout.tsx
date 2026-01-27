@@ -13,7 +13,8 @@ import {
   BookOpen,
   Menu,
   X,
-  FileText
+  FileText,
+  Settings
 } from 'lucide-react';
 import { User, ShiftType } from '../types.ts';
 
@@ -51,6 +52,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab
     { id: 'guests', label: 'Tamu', icon: <BookOpen size={20} />, roles: ['SECURITY', 'ADMIN'] },
     { id: 'residents', label: 'Warga', icon: <MapPin size={20} />, roles: ['SECURITY', 'ADMIN'] },
     { id: 'chat', label: 'Chat', icon: <MessageSquare size={20} />, roles: ['SECURITY', 'ADMIN', 'RESIDENT'] },
+    { id: 'settings', label: 'Setelan', icon: <Settings size={20} />, roles: ['SECURITY', 'ADMIN', 'RESIDENT'] },
   ];
 
   const filteredMenu = menuItems.filter(item => item.roles.includes(user.role));
@@ -154,20 +156,20 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab
           {children}
         </main>
 
-        {/* Bottom Navigation for Mobile */}
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 px-2 py-3 flex justify-around items-center z-50 shadow-[0_-10px_25px_-5px_rgba(0,0,0,0.05)]">
-          {filteredMenu.slice(0, 5).map((item) => (
+        {/* Bottom Navigation for Mobile - Updated to show more items */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 px-1 py-2 flex justify-around items-center z-50 shadow-[0_-10px_25px_-5px_rgba(0,0,0,0.05)]">
+          {filteredMenu.map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`flex flex-col items-center gap-1 transition-all duration-300 min-w-[64px] ${
+              className={`flex flex-col items-center gap-1 transition-all duration-300 flex-1 ${
                 activeTab === item.id ? 'text-amber-600 scale-110' : 'text-slate-400'
               }`}
             >
-              <div className={`p-1 rounded-xl transition-colors ${activeTab === item.id ? 'bg-amber-50' : ''}`}>
-                {item.icon}
+              <div className={`p-1 rounded-lg transition-colors ${activeTab === item.id ? 'bg-amber-50' : ''}`}>
+                {React.cloneElement(item.icon as React.ReactElement, { size: 18 })}
               </div>
-              <span className={`text-[10px] font-bold ${activeTab === item.id ? 'opacity-100' : 'opacity-60'}`}>
+              <span className={`text-[8px] font-black uppercase tracking-tighter ${activeTab === item.id ? 'opacity-100' : 'opacity-60'}`}>
                 {item.label}
               </span>
             </button>
