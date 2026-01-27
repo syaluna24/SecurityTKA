@@ -71,7 +71,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab
           </div>
         </div>
 
-        <nav className="flex-1 px-4 py-4 space-y-1.5 overflow-y-auto">
+        <nav className="flex-1 px-4 py-4 space-y-1.5 overflow-y-auto no-scrollbar">
           {filteredMenu.map((item) => (
             <button
               key={item.id}
@@ -121,9 +121,9 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab
             </div>
             <div>
               <h2 className="text-lg md:text-xl font-black text-slate-900 capitalize tracking-tight">
-                {activeTab === 'dashboard' ? 'Overview' : activeTab.replace('-', ' ')}
+                {menuItems.find(m => m.id === activeTab)?.label || 'Dashboard'}
               </h2>
-              <p className="text-[10px] md:text-xs text-slate-400 font-bold uppercase tracking-wider hidden sm:block">
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider hidden sm:block">
                 {currentTime.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long' })}
               </p>
             </div>
@@ -137,43 +137,50 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab
                 <p className="text-[10px] text-slate-500 uppercase font-black tracking-tighter">{user.role}</p>
               </div>
             </div>
-            <div className="relative group cursor-pointer">
-              <div className="w-10 h-10 md:w-12 md:h-12 rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200 border-2 border-white shadow-sm flex items-center justify-center text-slate-700 font-black text-lg transition-transform group-hover:scale-105">
-                {user.name.charAt(0)}
-              </div>
-              <button 
-                onClick={onLogout}
-                className="sm:hidden absolute -top-1 -right-1 bg-red-500 text-white p-1 rounded-full border-2 border-white shadow-md"
-              >
-                <LogOut size={12} />
-              </button>
-            </div>
+            <button 
+              onClick={() => setActiveTab('settings')}
+              className={`w-10 h-10 md:w-12 md:h-12 rounded-2xl border-2 flex items-center justify-center font-black text-lg transition-all active:scale-95 shadow-sm ${
+                activeTab === 'settings' 
+                  ? 'bg-amber-500 text-slate-900 border-amber-600' 
+                  : 'bg-gradient-to-br from-slate-100 to-slate-200 border-white text-slate-700'
+              }`}
+            >
+              {user.name.charAt(0)}
+            </button>
           </div>
         </header>
 
         {/* Dynamic Content Scrollable */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 pb-24 lg:pb-8">
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 pb-32 lg:pb-8 no-scrollbar">
           {children}
         </main>
 
-        {/* Bottom Navigation for Mobile - Updated to show more items */}
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 px-1 py-2 flex justify-around items-center z-50 shadow-[0_-10px_25px_-5px_rgba(0,0,0,0.05)]">
-          {filteredMenu.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`flex flex-col items-center gap-1 transition-all duration-300 flex-1 ${
-                activeTab === item.id ? 'text-amber-600 scale-110' : 'text-slate-400'
-              }`}
-            >
-              <div className={`p-1 rounded-lg transition-colors ${activeTab === item.id ? 'bg-amber-50' : ''}`}>
-                {React.cloneElement(item.icon as React.ReactElement, { size: 18 })}
-              </div>
-              <span className={`text-[8px] font-black uppercase tracking-tighter ${activeTab === item.id ? 'opacity-100' : 'opacity-60'}`}>
-                {item.label}
-              </span>
-            </button>
-          ))}
+        {/* Bottom Navigation for Mobile */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-slate-100 shadow-[0_-8px_30px_rgba(0,0,0,0.08)]">
+          <div className="flex flex-nowrap overflow-x-auto no-scrollbar items-center px-4 py-3 gap-2 scroll-smooth">
+            {filteredMenu.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`flex flex-col items-center justify-center min-w-[70px] flex-shrink-0 transition-all duration-300 ${
+                  activeTab === item.id ? 'text-amber-600 scale-105' : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                <div className={`p-2.5 rounded-xl transition-all ${
+                  activeTab === item.id 
+                    ? 'bg-amber-100 text-amber-600 shadow-sm' 
+                    : 'bg-transparent'
+                }`}>
+                  {React.cloneElement(item.icon as React.ReactElement, { size: 22 })}
+                </div>
+                <span className={`text-[9px] font-bold uppercase tracking-tighter mt-1 ${
+                  activeTab === item.id ? 'opacity-100' : 'opacity-60'
+                }`}>
+                  {item.label}
+                </span>
+              </button>
+            ))}
+          </div>
         </nav>
       </div>
     </div>
