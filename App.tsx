@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
-  SECURITY_USERS, 
+  SECURITY_USERS as INITIAL_SECURITY, 
   ADMIN_USERS, 
   MOCK_RESIDENTS,
   BLOCKS,
@@ -13,7 +13,7 @@ import {
   Shield, Search, Phone, Send, Users, MapPin, X, Lock, TrendingUp, AlertTriangle, 
   UserPlus, ArrowRight, CheckCircle, Clock, Edit2, Plus, Home, Settings, LogOut, 
   Activity, MessageSquare, FileText, BellRing, Database, Copy, Check, RefreshCw, 
-  PhoneCall, Info, LayoutGrid, Ghost
+  PhoneCall, Info, LayoutGrid, Ghost, Trash2, UserCog, UserCheck, Map
 } from 'lucide-react';
 import { analyzeIncident, getSecurityBriefing } from './services/geminiService.ts';
 import { DatabaseService } from './services/databaseService.ts';
@@ -21,6 +21,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 
 const INITIAL_DB: FullDatabase = {
   residents: MOCK_RESIDENTS,
+  securityUsers: INITIAL_SECURITY,
   guests: [],
   incidents: [],
   patrolLogs: [],
@@ -42,7 +43,8 @@ const App: React.FC = () => {
   const [loginError, setLoginError] = useState('');
   
   // 3. UI States
-  const [isModalOpen, setIsModalOpen] = useState<'RESIDENT' | 'GUEST' | 'INCIDENT' | 'SOS_MODAL' | 'SYNC_MODAL' | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState<'RESIDENT' | 'SECURITY' | 'CHECKPOINT' | 'GUEST' | 'INCIDENT' | 'SOS_MODAL' | 'SYNC_MODAL' | null>(null);
+  const [editingItem, setEditingItem] = useState<any>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [syncInput, setSyncInput] = useState('');
@@ -52,6 +54,8 @@ const App: React.FC = () => {
 
   // 4. Temp Form States
   const [resForm, setResForm] = useState<Partial<Resident>>({ name: '', houseNumber: '', block: BLOCKS[0], phoneNumber: '', isHome: true });
+  const [secForm, setSecForm] = useState<Partial<User>>({ name: '', role: 'SECURITY', phoneNumber: '' });
+  const [checkpointForm, setCheckpointForm] = useState('');
   const [guestForm, setGuestForm] = useState<Partial<GuestLog>>({ name: '', visitToId: '', purpose: '' });
   const [incForm, setIncForm] = useState({ type: 'Kriminalitas', location: '', description: '' });
   const [patrolAction, setPatrolAction] = useState<{cp: string, status: 'OK' | 'DANGER'} | null>(null);
@@ -84,7 +88,7 @@ const App: React.FC = () => {
     if (!selectedUser) return;
     const pin = passwordInput.trim();
     
-    const isSec = SECURITY_USERS.some(u => u.id === selectedUser.id) && pin === '123456';
+    const isSec = db.securityUsers.some(u => u.id === selectedUser.id) && pin === '123456';
     const isAdm = ADMIN_USERS.some(u => u.id === selectedUser.id) && pin === 'admin123';
     const isRes = db.residents.some(r => r.id === selectedUser.id) && pin === 'wargatka123456';
 
@@ -104,7 +108,90 @@ const App: React.FC = () => {
     setActiveTab('dashboard');
   };
 
-  // Content Handlers
+  // CRUD RESIDENTS
+  const handleSaveResident = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingItem) {
+      setDb(prev => ({
+        ...prev,
+        residents: prev.residents.map(r => r.id === editingItem.id ? { ...r, ...resForm } as Resident : r)
+      }));
+    } else {
+      const newRes: Resident = {
+        id: `res-${Date.now()}`,
+        name: resForm.name || '',
+        houseNumber: resForm.houseNumber || '',
+        block: resForm.block || BLOCKS[0],
+        phoneNumber: resForm.phoneNumber || '',
+        isHome: true
+      };
+      setDb(prev => ({ ...prev, residents: [newRes, ...prev.residents] }));
+    }
+    setIsModalOpen(null);
+    setEditingItem(null);
+    setResForm({ name: '', houseNumber: '', block: BLOCKS[0], phoneNumber: '', isHome: true });
+  };
+
+  const deleteResident = (id: string) => {
+    if (window.confirm('Hapus warga ini dari database?')) {
+      setDb(prev => ({ ...prev, residents: prev.residents.filter(r => r.id !== id) }));
+    }
+  };
+
+  // CRUD SECURITY
+  const handleSaveSecurity = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingItem) {
+      setDb(prev => ({
+        ...prev,
+        securityUsers: prev.securityUsers.map(u => u.id === editingItem.id ? { ...u, ...secForm } as User : u)
+      }));
+    } else {
+      const newSec: User = {
+        id: `sec-${Date.now()}`,
+        name: secForm.name || '',
+        role: 'SECURITY',
+        phoneNumber: secForm.phoneNumber
+      };
+      setDb(prev => ({ ...prev, securityUsers: [newSec, ...prev.securityUsers] }));
+    }
+    setIsModalOpen(null);
+    setEditingItem(null);
+    setSecForm({ name: '', role: 'SECURITY', phoneNumber: '' });
+  };
+
+  const deleteSecurity = (id: string) => {
+    if (window.confirm('Hapus petugas ini dari tim satpam?')) {
+      setDb(prev => ({ ...prev, securityUsers: prev.securityUsers.filter(u => u.id !== id) }));
+    }
+  };
+
+  // CRUD CHECKPOINTS
+  const handleSaveCheckpoint = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingItem !== null) {
+      setDb(prev => ({
+        ...prev,
+        checkpoints: prev.checkpoints.map((cp, idx) => idx === editingItem ? checkpointForm : cp)
+      }));
+    } else {
+      setDb(prev => ({ ...prev, checkpoints: [...prev.checkpoints, checkpointForm] }));
+    }
+    setIsModalOpen(null);
+    setEditingItem(null);
+    setCheckpointForm('');
+  };
+
+  const deleteCheckpoint = (index: number) => {
+    if (window.confirm('Hapus titik patroli ini?')) {
+      setDb(prev => ({
+        ...prev,
+        checkpoints: prev.checkpoints.filter((_, idx) => idx !== index)
+      }));
+    }
+  };
+
+  // OTHER HANDLERS
   const sendChat = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim() || !currentUser) return;
@@ -118,21 +205,6 @@ const App: React.FC = () => {
     };
     setDb(prev => ({ ...prev, chatMessages: [...prev.chatMessages, msg] }));
     setChatInput('');
-  };
-
-  const addResident = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newRes: Resident = {
-      id: `res-${Date.now()}`,
-      name: resForm.name || '',
-      houseNumber: resForm.houseNumber || '',
-      block: resForm.block || BLOCKS[0],
-      phoneNumber: resForm.phoneNumber || '',
-      isHome: true
-    };
-    setDb(prev => ({ ...prev, residents: [newRes, ...prev.residents] }));
-    setIsModalOpen(null);
-    setResForm({ name: '', houseNumber: '', block: BLOCKS[0], phoneNumber: '', isHome: true });
   };
 
   const addGuest = (e: React.FormEvent) => {
@@ -152,26 +224,15 @@ const App: React.FC = () => {
     setGuestForm({ name: '', visitToId: '', purpose: '' });
   };
 
-  // Fix: Integrated analyzeIncident AI service to automatically classify incident severity
   const addIncident = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
     setIsAnalyzing(true);
-    
     let severity: 'LOW' | 'MEDIUM' | 'HIGH' = 'MEDIUM';
     try {
-      // Call Gemini for real-time risk assessment
       const analysis = await analyzeIncident(incForm.description);
-      if (analysis && analysis.severity) {
-        const aiSeverity = analysis.severity.toUpperCase();
-        if (['LOW', 'MEDIUM', 'HIGH'].includes(aiSeverity)) {
-          severity = aiSeverity as any;
-        }
-      }
-    } catch (error) {
-      console.error("AI Analysis failed:", error);
-    }
-
+      if (analysis?.severity) severity = analysis.severity as any;
+    } catch {}
     const newInc: IncidentReport = {
       id: `inc-${Date.now()}`,
       reporterId: currentUser.id,
@@ -210,8 +271,8 @@ const App: React.FC = () => {
       id: `sos-${Date.now()}`,
       reporterId: currentUser.id, reporterName: currentUser.name,
       timestamp: new Date().toISOString(),
-      type: 'EMERGENCY / SOS', location: 'Area Warga',
-      description: `Warga ${currentUser.name} memicu sinyal darurat!`,
+      type: 'EMERGENCY / SOS', location: 'Area Kawasan',
+      description: `Warga ${currentUser.name} membutuhkan bantuan segera!`,
       status: 'PENDING', severity: 'HIGH'
     };
     setDb(prev => ({ ...prev, incidents: [sos, ...prev.incidents] }));
@@ -230,16 +291,16 @@ const App: React.FC = () => {
   };
 
   const chartData = useMemo(() => {
-    const blocks = ['A', 'B', 'C'];
+    const blocks = ['A', 'B', 'C', 'D'];
     return blocks.map(b => ({
       name: `Blok ${b}`,
       val: db.incidents.filter(i => i.location.toUpperCase().includes(b)).length + 1
     }));
   }, [db.incidents]);
 
-  // LOGIN PAGE RENDERER
+  // LOGIN PAGE
   if (!currentUser) {
-    const pool = loginTab === 'SECURITY' ? SECURITY_USERS : loginTab === 'ADMIN' ? ADMIN_USERS : db.residents.map(r => ({ id: r.id, name: r.name, sub: `Blok ${r.block} No. ${r.houseNumber}` }));
+    const pool = loginTab === 'SECURITY' ? db.securityUsers : loginTab === 'ADMIN' ? ADMIN_USERS : db.residents.map(r => ({ id: r.id, name: r.name, sub: `Blok ${r.block} No. ${r.houseNumber}` }));
 
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
@@ -250,20 +311,20 @@ const App: React.FC = () => {
               <div className="bg-amber-500 w-16 h-16 rounded-3xl flex items-center justify-center mb-8">
                 <Shield size={32} className="text-slate-900" />
               </div>
-              <h1 className="text-4xl font-black mb-4">TKA SECURE</h1>
-              <p className="text-slate-400 text-sm leading-relaxed">Integrated Security System.<br/>Login menggunakan PIN resmi Anda.</p>
+              <h1 className="text-4xl font-black mb-4 tracking-tighter">TKA SECURE</h1>
+              <p className="text-slate-400 text-sm leading-relaxed">Integrated Security & Resident Hub.<br/>Gunakan PIN resmi TKA Anda.</p>
             </div>
             <div className="p-6 bg-slate-800/40 rounded-3xl border border-slate-700">
                <div className="flex items-center gap-2 mb-2">
                  <RefreshCw size={16} className="text-amber-500 animate-spin-slow"/>
-                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Database Cloud Ready</span>
+                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Master Database Sync</span>
                </div>
-               <p className="text-[9px] text-slate-500 font-bold uppercase leading-relaxed">Sinkronisasi kode master aktif. Gunakan menu setelan untuk memindahkan data antar perangkat.</p>
+               <p className="text-[9px] text-slate-500 font-bold uppercase leading-relaxed">Admin dapat menggunakan fitur Cloud Sync untuk sinkronisasi antar perangkat.</p>
             </div>
           </div>
 
           <div className="w-full md:w-7/12 p-10">
-            <h2 className="text-3xl font-black text-slate-900 mb-8">Portal Masuk</h2>
+            <h2 className="text-3xl font-black text-slate-900 mb-8 tracking-tight">Portal Log In</h2>
             <div className="flex bg-slate-100 p-1 rounded-2xl mb-8">
               {(['SECURITY', 'ADMIN', 'RESIDENT'] as const).map(t => (
                 <button 
@@ -286,14 +347,14 @@ const App: React.FC = () => {
                     <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center font-black">{u.name.charAt(0)}</div>
                     <div className="flex-1">
                       <p className="font-black text-slate-900 text-sm">{u.name}</p>
-                      <p className="text-[9px] text-slate-400 font-bold uppercase">{u.sub || 'Staff Operasional'}</p>
+                      <p className="text-[9px] text-slate-400 font-bold uppercase">{u.sub || 'Keamanan Kawasan'}</p>
                     </div>
                     {selectedUser?.id === u.id && <CheckCircle size={20} className="text-amber-500" />}
                   </button>
                 )) : (
                   <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-3xl">
                      <Ghost size={48} className="mx-auto text-slate-200 mb-4" />
-                     <p className="text-[10px] font-black text-slate-300 uppercase italic">Database Warga Kosong</p>
+                     <p className="text-[10px] font-black text-slate-300 uppercase italic">Belum Ada Data</p>
                   </div>
                 )}
               </div>
@@ -303,13 +364,13 @@ const App: React.FC = () => {
                   <div className="relative">
                     <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={20}/>
                     <input 
-                      type="password" required placeholder="PIN Anda"
+                      type="password" required placeholder="Masukkan PIN PIN PIN"
                       className="w-full pl-14 pr-6 py-4 rounded-2xl bg-slate-50 border-2 border-slate-100 focus:border-amber-500 outline-none font-black text-xl tracking-widest" 
                       value={passwordInput} onChange={e => setPasswordInput(e.target.value)} 
                     />
                   </div>
                   {loginError && <p className="text-red-500 text-[10px] font-black uppercase text-center">{loginError}</p>}
-                  <button type="submit" className="w-full bg-slate-900 text-white font-black py-4 rounded-2xl hover:bg-slate-800 transition-all flex items-center justify-center gap-3 text-xs uppercase tracking-widest active:scale-95 shadow-xl shadow-slate-900/10">
+                  <button type="submit" className="w-full bg-slate-900 text-white font-black py-4 rounded-2xl hover:bg-slate-800 transition-all flex items-center justify-center gap-3 text-xs uppercase tracking-widest active:scale-95 shadow-xl">
                     MASUK SEKARANG <ArrowRight size={18} />
                   </button>
                 </div>
@@ -326,27 +387,27 @@ const App: React.FC = () => {
       
       {/* DASHBOARD */}
       {activeTab === 'dashboard' && (
-        <div className="space-y-6 animate-slide-up">
+        <div className="space-y-6 animate-slide-up pb-24">
           {currentUser.role === 'RESIDENT' && (
             <div className="bg-red-600 p-8 rounded-[2.5rem] text-white shadow-xl flex flex-col md:flex-row justify-between items-center gap-6 mb-8 relative overflow-hidden">
                <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 blur-[50px] rounded-full"></div>
                <div className="flex items-center gap-6 relative z-10">
                  <div className="bg-white/20 p-4 rounded-2xl"><BellRing size={32} className="animate-bounce" /></div>
                  <div>
-                    <h3 className="text-xl font-black mb-1 tracking-tighter uppercase">Butuh Bantuan Segera?</h3>
-                    <p className="text-xs text-red-100 font-medium opacity-90">Sinyal darurat akan dikirimkan ke seluruh tim keamanan kawasan.</p>
+                    <h3 className="text-xl font-black mb-1 tracking-tighter uppercase">KEADAAN DARURAT?</h3>
+                    <p className="text-xs text-red-100 font-medium opacity-90">Sinyal SOS akan segera diteruskan ke seluruh tim keamanan.</p>
                  </div>
                </div>
-               <button onClick={triggerSOS} className="bg-white text-red-600 px-10 py-4 rounded-2xl font-black uppercase text-xs shadow-xl active:scale-95 transition-all relative z-10">PANGGIL SOS</button>
+               <button onClick={triggerSOS} className="bg-white text-red-600 px-10 py-4 rounded-2xl font-black uppercase text-xs shadow-xl active:scale-95 transition-all relative z-10">AKTIFKAN SOS</button>
             </div>
           )}
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {[
-              { label: 'Total Patroli', val: db.patrolLogs.length, icon: <Activity size={24}/>, color: 'amber' },
-              { label: 'Insiden Aktif', val: db.incidents.filter(i => i.status !== 'RESOLVED').length, icon: <AlertTriangle size={24}/>, color: 'red' },
-              { label: 'Tamu Terdaftar', val: db.guests.filter(g => g.status === 'IN').length, icon: <Users size={24}/>, color: 'blue' },
-              { label: 'Warga Terdaftar', val: db.residents.length, icon: <Home size={24}/>, color: 'green' }
+              { label: 'Tim Keamanan', val: db.securityUsers.length, icon: <UserCheck size={24}/>, color: 'blue' },
+              { label: 'Laporan Masuk', val: db.incidents.filter(i => i.status !== 'RESOLVED').length, icon: <AlertTriangle size={24}/>, color: 'red' },
+              { label: 'Tamu Terdaftar', val: db.guests.filter(g => g.status === 'IN').length, icon: <Users size={24}/>, color: 'amber' },
+              { label: 'Basis Warga', val: db.residents.length, icon: <Home size={24}/>, color: 'green' }
             ].map((s, i) => (
               <div key={i} className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100">
                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ${s.color === 'amber' ? 'bg-amber-50 text-amber-600' : s.color === 'red' ? 'bg-red-50 text-red-600' : s.color === 'blue' ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600'}`}>
@@ -358,9 +419,9 @@ const App: React.FC = () => {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pb-20">
-            <div className="lg:col-span-2 bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
-               <h3 className="text-lg font-black text-slate-900 mb-8 flex items-center gap-3"><TrendingUp size={22} className="text-amber-500"/> Statistik Kawasan</h3>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 min-h-[350px]">
+               <h3 className="text-lg font-black text-slate-900 mb-8 flex items-center gap-3"><TrendingUp size={22} className="text-amber-500"/> Peta Keamanan Kawasan</h3>
                <div className="h-[280px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={chartData}>
@@ -375,28 +436,43 @@ const App: React.FC = () => {
             <div className="bg-slate-900 text-white p-8 rounded-[2.5rem] flex flex-col justify-between shadow-2xl relative overflow-hidden">
                <div className="absolute bottom-0 right-0 w-32 h-32 bg-amber-500/10 blur-[50px] rounded-full"></div>
                <div className="relative z-10">
-                  <h3 className="font-black text-xl mb-6 flex items-center gap-3 text-amber-500"><Shield size={28}/> Briefing AI</h3>
-                  <p className="text-slate-400 text-xs italic leading-relaxed">"{securityBriefing || 'Menghubungkan ke server AI...'}"</p>
+                  <h3 className="font-black text-xl mb-6 flex items-center gap-3 text-amber-500"><Shield size={28}/> Briefing Sistem</h3>
+                  <p className="text-slate-400 text-xs italic leading-relaxed">"{securityBriefing || 'Menyambungkan ke asisten keamanan...'}"</p>
                </div>
-               <button onClick={() => setActiveTab('chat')} className="w-full bg-amber-500 text-slate-900 font-black py-4 rounded-xl mt-8 text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95 shadow-xl shadow-amber-500/20 relative z-10">KOORDINASI TIM <ArrowRight size={18}/></button>
+               <button onClick={() => setActiveTab('chat')} className="w-full bg-amber-500 text-slate-900 font-black py-4 rounded-xl mt-8 text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95 shadow-xl relative z-10">MULAI KOORDINASI <ArrowRight size={18}/></button>
             </div>
           </div>
         </div>
       )}
 
-      {/* PATROL TAB */}
+      {/* PATROL TAB - CRUD CHECKPOINTS ADDED */}
       {activeTab === 'patrol' && (
         <div className="space-y-6 animate-slide-up pb-24">
-           <h3 className="text-2xl font-black text-slate-900">Kendali Patroli</h3>
+           <div className="flex justify-between items-center">
+              <h3 className="text-2xl font-black text-slate-900">Kontrol Patroli</h3>
+              {currentUser.role === 'ADMIN' && (
+                <button onClick={() => { setEditingItem(null); setCheckpointForm(''); setIsModalOpen('CHECKPOINT'); }} className="bg-slate-900 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase flex items-center gap-2 active:scale-95 shadow-xl">
+                  <Plus size={18}/> TAMBAH TITIK
+                </button>
+              )}
+           </div>
            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {db.checkpoints.map((cp, idx) => {
                 const last = db.patrolLogs.filter(l => l.checkpoint === cp)[0];
                 return (
-                  <div key={idx} className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-between">
+                  <div key={idx} className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-between group hover:shadow-md transition-all">
                     <div>
                       <div className="flex justify-between items-start mb-6">
                         <div className="w-12 h-12 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-black text-lg">{idx + 1}</div>
-                        {last && <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase ${last.status === 'OK' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>{last.status}</span>}
+                        <div className="flex gap-1">
+                          {currentUser.role === 'ADMIN' && (
+                            <>
+                              <button onClick={() => { setEditingItem(idx); setCheckpointForm(cp); setIsModalOpen('CHECKPOINT'); }} className="p-2 bg-slate-50 text-slate-400 rounded-lg hover:text-amber-500"><Edit2 size={14}/></button>
+                              <button onClick={() => deleteCheckpoint(idx)} className="p-2 bg-slate-50 text-slate-400 rounded-lg hover:text-red-500"><Trash2 size={14}/></button>
+                            </>
+                          )}
+                          {last && <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase ${last.status === 'OK' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>{last.status}</span>}
+                        </div>
                       </div>
                       <h4 className="text-lg font-black text-slate-900 mb-8">{cp}</h4>
                     </div>
@@ -406,7 +482,7 @@ const App: React.FC = () => {
                         <button onClick={() => setPatrolAction({cp, status: 'DANGER'})} className="py-4 bg-red-600 text-white rounded-xl font-black text-[10px] uppercase active:scale-95 shadow-lg shadow-red-600/10">BAHAYA</button>
                       </div>
                     ) : (
-                      <div className="text-[10px] font-bold text-slate-400 uppercase border-t pt-4">Log: {last ? `${last.securityName} (${new Date(last.timestamp).toLocaleTimeString()})` : 'Belum Dicek'}</div>
+                      <div className="text-[10px] font-bold text-slate-400 uppercase border-t pt-4">History: {last ? `${last.securityName} (${new Date(last.timestamp).toLocaleTimeString()})` : 'Belum Pernah'}</div>
                     )}
                   </div>
                 );
@@ -419,8 +495,8 @@ const App: React.FC = () => {
       {activeTab === 'incident' && (
         <div className="space-y-6 animate-slide-up pb-24">
           <div className="flex justify-between items-center">
-            <h3 className="text-2xl font-black text-slate-900">Laporan Insiden</h3>
-            <button onClick={() => setIsModalOpen('INCIDENT')} className="bg-red-600 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase flex items-center gap-2 active:scale-95 shadow-xl shadow-red-500/20"><AlertTriangle size={18}/> LAPOR KEJADIAN</button>
+            <h3 className="text-2xl font-black text-slate-900">Daftar Kejadian</h3>
+            <button onClick={() => setIsModalOpen('INCIDENT')} className="bg-red-600 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase flex items-center gap-2 active:scale-95 shadow-xl"><AlertTriangle size={18}/> LAPORAN BARU</button>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {db.incidents.length > 0 ? db.incidents.map(i => (
@@ -446,7 +522,7 @@ const App: React.FC = () => {
             )) : (
               <div className="lg:col-span-2 py-32 text-center bg-white rounded-[3rem] border-4 border-dashed border-slate-50">
                  <Ghost size={64} className="mx-auto text-slate-100 mb-4" />
-                 <p className="text-slate-300 font-black uppercase italic tracking-widest text-xs">Lingkungan Kondusif & Aman</p>
+                 <p className="text-slate-300 font-black uppercase italic tracking-widest text-xs">Lingkungan Terpantau Aman</p>
               </div>
             )}
           </div>
@@ -457,33 +533,33 @@ const App: React.FC = () => {
       {activeTab === 'guests' && (
         <div className="space-y-6 animate-slide-up pb-24">
            <div className="flex justify-between items-center">
-              <h3 className="text-2xl font-black text-slate-900">Buku Tamu</h3>
-              <button onClick={() => setIsModalOpen('GUEST')} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase flex items-center gap-2 shadow-xl shadow-blue-500/20 active:scale-95 transition-all"><UserPlus size={18}/> DAFTAR TAMU</button>
+              <h3 className="text-2xl font-black text-slate-900">Logbook Tamu</h3>
+              <button onClick={() => setIsModalOpen('GUEST')} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase flex items-center gap-2 shadow-xl active:scale-95"><UserPlus size={18}/> REGISTRASI TAMU</button>
            </div>
            <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden overflow-x-auto">
               <table className="w-full text-left min-w-[600px]">
                 <thead className="bg-slate-50 border-b border-slate-100">
                   <tr>
-                    <th className="px-8 py-5 text-[10px] font-black uppercase text-slate-400">Identitas</th>
-                    <th className="px-8 py-5 text-[10px] font-black uppercase text-slate-400">Tujuan Unit</th>
+                    <th className="px-8 py-5 text-[10px] font-black uppercase text-slate-400">Nama Lengkap</th>
+                    <th className="px-8 py-5 text-[10px] font-black uppercase text-slate-400">Unit Tujuan</th>
                     <th className="px-8 py-5 text-[10px] font-black uppercase text-slate-400">Status</th>
-                    <th className="px-8 py-5 text-[10px] font-black uppercase text-slate-400">Masuk</th>
+                    <th className="px-8 py-5 text-[10px] font-black uppercase text-slate-400">Check In</th>
                     <th className="px-8 py-5"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                    {db.guests.length > 0 ? db.guests.map(g => (
-                     <tr key={g.id} className="hover:bg-slate-50/50 transition-colors">
+                     <tr key={g.id} className="hover:bg-slate-50/50">
                        <td className="px-8 py-4 font-bold text-slate-900 text-sm">{g.name}</td>
                        <td className="px-8 py-4 text-xs font-bold text-slate-500 uppercase">{g.visitToName}</td>
                        <td className="px-8 py-4"><span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase ${g.status === 'IN' ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-400'}`}>{g.status}</span></td>
                        <td className="px-8 py-4 text-[10px] font-black text-slate-400">{new Date(g.entryTime).toLocaleTimeString()}</td>
                        <td className="px-8 py-4 text-right pr-10">
-                          {g.status === 'IN' && <button onClick={() => setDb(prev => ({...prev, guests: prev.guests.map(item => item.id === g.id ? {...item, status: 'OUT'} : item)}))} className="p-2 text-slate-300 hover:text-red-500 transition-all"><LogOut size={18}/></button>}
+                          {g.status === 'IN' && <button onClick={() => setDb(prev => ({...prev, guests: prev.guests.map(item => item.id === g.id ? {...item, status: 'OUT'} : item)}))} className="p-2 text-slate-300 hover:text-red-500"><LogOut size={18}/></button>}
                        </td>
                      </tr>
                    )) : (
-                     <tr><td colSpan={5} className="py-20 text-center text-slate-300 font-black uppercase italic text-xs">Belum Ada Tamu Terdaftar Hari Ini</td></tr>
+                     <tr><td colSpan={5} className="py-20 text-center text-slate-300 font-black uppercase italic text-xs">Belum Ada Tamu Terdaftar</td></tr>
                    )}
                 </tbody>
               </table>
@@ -495,17 +571,17 @@ const App: React.FC = () => {
       {activeTab === 'residents' && (
         <div className="space-y-6 animate-slide-up pb-24">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <h3 className="text-2xl font-black text-slate-900">Data Hunian</h3>
+            <h3 className="text-2xl font-black text-slate-900">Manajemen Hunian</h3>
             <div className="flex gap-3">
-              <div className="relative group">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-amber-500 transition-colors" size={18}/>
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18}/>
                 <input 
                   type="text" placeholder="Cari warga..." 
-                  className="pl-12 pr-4 py-3 rounded-xl bg-white border border-slate-200 text-sm outline-none focus:border-amber-500 font-bold w-full md:w-[250px] transition-all" 
+                  className="pl-12 pr-4 py-3 rounded-xl bg-white border border-slate-200 text-sm outline-none focus:border-amber-500 font-bold w-full md:w-[250px]" 
                   value={searchQuery} onChange={e => setSearchQuery(e.target.value)} 
                 />
               </div>
-              {currentUser.role === 'ADMIN' && <button onClick={() => setIsModalOpen('RESIDENT')} className="bg-slate-900 text-white p-3 rounded-xl shadow-lg active:scale-95 transition-all"><Plus size={24}/></button>}
+              {currentUser.role === 'ADMIN' && <button onClick={() => { setEditingItem(null); setResForm({ name: '', houseNumber: '', block: BLOCKS[0], phoneNumber: '', isHome: true }); setIsModalOpen('RESIDENT'); }} className="bg-slate-900 text-white p-3 rounded-xl shadow-lg active:scale-95 transition-all"><Plus size={24}/></button>}
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -519,9 +595,14 @@ const App: React.FC = () => {
                    <h4 className="font-black text-xl text-slate-900 mb-1 leading-tight">{res.name}</h4>
                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Unit: <span className="text-slate-900">{res.houseNumber}</span></p>
                 </div>
-                <div className="mt-8 flex gap-3">
-                   <a href={`tel:${res.phoneNumber}`} className="flex-1 py-4 bg-green-500 text-white rounded-2xl flex items-center justify-center shadow-lg active:scale-95 transition-all hover:bg-green-600"><PhoneCall size={22}/></a>
-                   {currentUser.role === 'ADMIN' && <button className="p-4 bg-slate-50 text-slate-400 rounded-2xl hover:text-amber-500 hover:bg-amber-50 transition-all"><Edit2 size={20}/></button>}
+                <div className="mt-8 flex gap-2">
+                   <a href={`tel:${res.phoneNumber}`} className="flex-1 py-4 bg-green-500 text-white rounded-2xl flex items-center justify-center shadow-lg hover:bg-green-600"><PhoneCall size={20}/></a>
+                   {currentUser.role === 'ADMIN' && (
+                     <>
+                        <button onClick={() => { setEditingItem(res); setResForm(res); setIsModalOpen('RESIDENT'); }} className="p-4 bg-slate-50 text-slate-400 rounded-2xl hover:text-amber-500 hover:bg-amber-50"><Edit2 size={18}/></button>
+                        <button onClick={() => deleteResident(res.id)} className="p-4 bg-slate-50 text-slate-400 rounded-2xl hover:text-red-500 hover:bg-red-50"><Trash2 size={18}/></button>
+                     </>
+                   )}
                 </div>
               </div>
             ))}
@@ -565,141 +646,209 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* SETTINGS / CLOUD SYNC TAB */}
-      {activeTab === 'settings' && (
-        <div className="max-w-3xl mx-auto space-y-10 animate-slide-up pb-24">
-          <div className="bg-white p-12 rounded-[3.5rem] border border-slate-100 shadow-sm relative overflow-hidden">
+      {/* ADMIN SETTINGS & STAFF MANAGEMENT */}
+      {activeTab === 'settings' && currentUser.role === 'ADMIN' && (
+        <div className="space-y-12 animate-slide-up pb-24">
+           {/* Section 1: Staff */}
+           <div className="space-y-6">
+              <div className="flex justify-between items-center">
+                 <h3 className="text-2xl font-black text-slate-900">Tim Satpam Aktif</h3>
+                 <button onClick={() => { setEditingItem(null); setSecForm({ name: '', role: 'SECURITY', phoneNumber: '' }); setIsModalOpen('SECURITY'); }} className="bg-slate-900 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase flex items-center gap-2 shadow-xl"><UserPlus size={18}/> TAMBAH PETUGAS</button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                 {db.securityUsers.map(u => (
+                   <div key={u.id} className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-between hover:shadow-md transition-all">
+                      <div className="flex items-center gap-6 mb-8">
+                         <div className="w-16 h-16 rounded-3xl bg-slate-900 text-white flex items-center justify-center text-2xl font-black">{u.name.charAt(0)}</div>
+                         <div>
+                           <h4 className="text-xl font-black text-slate-900">{u.name}</h4>
+                           <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest tracking-tighter">Status: Operasional</p>
+                         </div>
+                      </div>
+                      <div className="flex gap-2 border-t pt-6">
+                         <button onClick={() => { setEditingItem(u); setSecForm(u); setIsModalOpen('SECURITY'); }} className="flex-1 py-3 bg-slate-50 text-slate-600 rounded-xl font-black text-[10px] uppercase flex items-center justify-center gap-2 hover:bg-slate-100"><Edit2 size={14}/> EDIT</button>
+                         <button onClick={() => deleteSecurity(u.id)} className="flex-1 py-3 bg-red-50 text-red-600 rounded-xl font-black text-[10px] uppercase flex items-center justify-center gap-2 hover:bg-red-100"><Trash2 size={14}/> HAPUS</button>
+                      </div>
+                   </div>
+                 ))}
+              </div>
+           </div>
+
+           {/* Section 2: Sync & Cloud */}
+           <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-sm relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-slate-50 blur-[100px] rounded-full"></div>
+              <h3 className="text-2xl font-black text-slate-900 mb-8 relative z-10">Pusat Sinkronisasi Master</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10">
+                 <div className="p-8 bg-slate-50 rounded-[3rem] border border-slate-100">
+                    <Database size={24} className="text-amber-600 mb-4"/>
+                    <h5 className="font-black text-sm uppercase tracking-widest mb-2">Export Data Master</h5>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase mb-6 italic leading-relaxed">Gunakan kode ini untuk memindahkan seluruh data ke perangkat lain.</p>
+                    <button onClick={() => { setSyncInput(DatabaseService.exportSyncCode()); setIsModalOpen('SYNC_MODAL'); }} className="w-full py-4 bg-white border-2 border-slate-100 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-3 hover:bg-slate-900 hover:text-white transition-all shadow-sm">GENERATE MASTER CODE</button>
+                 </div>
+                 <div className="p-8 bg-slate-50 rounded-[3rem] border border-slate-100">
+                    <RefreshCw size={24} className="text-blue-600 mb-4"/>
+                    <h5 className="font-black text-sm uppercase tracking-widest mb-2">Import Data Master</h5>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase mb-6 italic leading-relaxed">Tempel kode master untuk memperbarui data perangkat ini dengan database terbaru.</p>
+                    <button onClick={() => { setSyncInput(''); setIsModalOpen('SYNC_MODAL'); }} className="w-full py-4 bg-white border-2 border-slate-100 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-3 hover:bg-slate-900 hover:text-white transition-all shadow-sm">INPUT MASTER CODE</button>
+                 </div>
+              </div>
+              <div className="pt-10 border-t mt-10">
+                <button onClick={handleLogout} className="w-full py-5 bg-red-50 text-red-600 rounded-[1.5rem] font-black uppercase text-[11px] tracking-widest flex items-center justify-center gap-4 active:scale-95 transition-all shadow-sm hover:bg-red-100"><LogOut size={20}/> KELUAR SISTEM</button>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* SETTINGS FOR SECURITY/RESIDENT */}
+      {activeTab === 'settings' && currentUser.role !== 'ADMIN' && (
+         <div className="max-w-3xl mx-auto animate-slide-up pb-24">
+           <div className="bg-white p-12 rounded-[3.5rem] border border-slate-100 shadow-sm relative overflow-hidden">
              <div className="absolute top-0 right-0 w-64 h-64 bg-slate-50 blur-[100px] rounded-full"></div>
-             <h3 className="text-3xl font-black text-slate-900 mb-12 relative z-10 tracking-tight">Akun & Sinkronisasi Master</h3>
+             <h3 className="text-3xl font-black text-slate-900 mb-12 relative z-10 tracking-tight">Setelan Akun</h3>
              <div className="space-y-10 relative z-10">
                 <div className="flex items-center gap-8 p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100 shadow-inner">
                    <div className="w-24 h-24 rounded-[2rem] bg-slate-900 text-white flex items-center justify-center text-4xl font-black shadow-2xl">{currentUser.name.charAt(0)}</div>
                    <div>
                       <h4 className="text-2xl font-black text-slate-900">{currentUser.name}</h4>
-                      <p className="text-xs font-black text-amber-600 uppercase tracking-widest mt-1">Akses: {currentUser.role} Perumahan</p>
+                      <p className="text-xs font-black text-amber-600 uppercase tracking-widest mt-1">Status: {currentUser.role}</p>
                    </div>
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                   <div className="p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100">
-                      <div className="flex items-center gap-4 mb-4 text-amber-600"><Database size={24}/><h5 className="font-black text-sm uppercase tracking-widest">Master Cloud Export</h5></div>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-6 leading-relaxed italic">Salin kode ini di laptop dan tempel di HP Anda agar data tersinkron sempurna.</p>
-                      <button onClick={() => { setSyncInput(DatabaseService.exportSyncCode()); setIsModalOpen('SYNC_MODAL'); }} className="w-full py-4 bg-white border-2 border-slate-100 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-3 hover:bg-slate-900 hover:text-white transition-all shadow-sm">SALIN KODE MASTER</button>
-                   </div>
-                   <div className="p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100">
-                      <div className="flex items-center gap-4 mb-4 text-blue-600"><RefreshCw size={24}/><h5 className="font-black text-sm uppercase tracking-widest">Master Cloud Import</h5></div>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-6 leading-relaxed italic">Tempel kode master dari laptop untuk memperbarui seluruh data di perangkat ini.</p>
-                      <button onClick={() => { setSyncInput(''); setIsModalOpen('SYNC_MODAL'); }} className="w-full py-4 bg-white border-2 border-slate-100 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-3 hover:bg-slate-900 hover:text-white transition-all shadow-sm">TEMPEL KODE MASTER</button>
-                   </div>
-                </div>
-
                 <div className="pt-10 border-t border-slate-100">
                    <button onClick={handleLogout} className="w-full py-5 bg-red-50 text-red-600 rounded-[1.5rem] font-black uppercase text-[11px] tracking-widest flex items-center justify-center gap-4 active:scale-95 transition-all hover:bg-red-100 shadow-md"><LogOut size={20}/> KELUAR APLIKASI</button>
                 </div>
              </div>
-          </div>
-        </div>
+           </div>
+         </div>
       )}
 
-      {/* SYNC MODAL */}
-      {isModalOpen === 'SYNC_MODAL' && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in">
-          <div className="bg-white w-full max-w-2xl rounded-[3rem] shadow-2xl animate-slide-up overflow-hidden">
-            <div className="p-10 bg-slate-900 text-white flex justify-between items-center">
-              <div><h3 className="text-2xl font-black">TKA Cloud Sync</h3><p className="text-[10px] font-bold uppercase text-slate-400 mt-1">Cross-Device Synchronizer</p></div>
-              <button onClick={() => setIsModalOpen(null)} className="p-3 bg-white/10 rounded-2xl hover:bg-white/20 transition-all"><X size={28}/></button>
-            </div>
-            <div className="p-10 space-y-8">
-               <div className="space-y-3">
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Kode Master Sinkronisasi:</label>
-                  <textarea 
-                    className="w-full p-6 bg-slate-50 border-2 border-slate-100 rounded-2xl text-[10px] font-mono break-all outline-none focus:border-amber-500 transition-all min-h-[150px] shadow-inner" 
-                    value={syncInput} onChange={e => setSyncInput(e.target.value)} placeholder="Kode enkripsi database akan muncul di sini..."
-                  />
-               </div>
-               <div className="grid grid-cols-2 gap-4">
-                  <button onClick={() => { navigator.clipboard.writeText(syncInput); setIsCopied(true); setTimeout(() => setIsCopied(false), 2000); }} className="py-4 bg-slate-50 text-slate-600 border border-slate-200 rounded-2xl font-black text-[10px] uppercase flex items-center justify-center gap-2 hover:bg-slate-100 transition-all">
-                    {isCopied ? <Check size={18} className="text-green-500"/> : <Copy size={18}/>} {isCopied ? 'TERSALIN KE CLIPBOARD' : 'SALIN KODE MASTER'}
-                  </button>
-                  <button onClick={importData} className="py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase shadow-xl hover:bg-slate-800 active:scale-95 transition-all">APLIKASIKAN KE PERANGKAT</button>
-               </div>
-               <div className="flex gap-3 bg-amber-50 p-5 rounded-2xl border border-amber-100 items-start">
-                  <Info size={20} className="text-amber-600 mt-1 flex-shrink-0" />
-                  <p className="text-[9px] font-bold text-amber-700 leading-relaxed uppercase">Peringatan Penting: Mengaplikasikan kode master akan menghapus seluruh data di perangkat ini dan menggantinya dengan data dari kode tersebut secara permanen.</p>
-               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL RESIDENT */}
-      {isModalOpen === 'RESIDENT' && (
+      {/* MODALS */}
+      {/* MODAL CHECKPOINT (ADD/EDIT) */}
+      {isModalOpen === 'CHECKPOINT' && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in">
           <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl animate-slide-up">
             <div className="p-10 bg-[#0F172A] text-white flex justify-between items-center rounded-t-[3rem]">
-              <h3 className="text-2xl font-black tracking-tight">Data Warga Baru</h3>
+              <h3 className="text-2xl font-black tracking-tight">{editingItem !== null ? 'Edit Titik Patroli' : 'Tambah Titik Patroli'}</h3>
               <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
             </div>
-            <form onSubmit={addResident} className="p-10 space-y-6">
-              <input type="text" required placeholder="Nama Lengkap Warga..." className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-base focus:border-amber-500 transition-all" value={resForm.name} onChange={e => setResForm({...resForm, name: e.target.value})} />
-              <div className="grid grid-cols-2 gap-4">
-                <select className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={resForm.block} onChange={e => setResForm({...resForm, block: e.target.value})}>
-                  {BLOCKS.map(b => <option key={b} value={b}>{b}</option>)}
-                </select>
-                <input type="text" required placeholder="No. Unit" className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={resForm.houseNumber} onChange={e => setResForm({...resForm, houseNumber: e.target.value})} />
-              </div>
-              <input type="tel" required placeholder="WhatsApp (Aktif)..." className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-base focus:border-amber-500 transition-all" value={resForm.phoneNumber} onChange={e => setResForm({...resForm, phoneNumber: e.target.value})} />
-              <div className="bg-amber-50 p-6 rounded-[2rem] border border-amber-100">
-                 <p className="text-[10px] font-black text-amber-600 uppercase mb-2 tracking-widest">Akses Login Warga:</p>
-                 <p className="text-xs font-bold text-slate-700">User: <span className="font-black">{resForm.name || '...'}</span></p>
-                 <p className="text-xs font-bold text-slate-700">PIN Login: <span className="font-black text-slate-900 tracking-widest">wargatka123456</span></p>
-              </div>
-              <button type="submit" className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">SIMPAN KE DATABASE</button>
+            <form onSubmit={handleSaveCheckpoint} className="p-10 space-y-6">
+              <input type="text" required placeholder="Nama Area/Titik (Misal: Gudang Belakang)..." className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-base focus:border-amber-500 transition-all" value={checkpointForm} onChange={e => setCheckpointForm(e.target.value)} />
+              <button type="submit" className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">SIMPAN DATA</button>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL GUEST */}
+      {isModalOpen === 'RESIDENT' && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in">
+          <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl animate-slide-up">
+            <div className="p-10 bg-[#0F172A] text-white flex justify-between items-center rounded-t-[3rem]">
+              <h3 className="text-2xl font-black tracking-tight">{editingItem ? 'Edit Data Warga' : 'Warga Baru'}</h3>
+              <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
+            </div>
+            <form onSubmit={handleSaveResident} className="p-10 space-y-6">
+              <input type="text" required placeholder="Nama Lengkap..." className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-base focus:border-amber-500 transition-all" value={resForm.name} onChange={e => setResForm({...resForm, name: e.target.value})} />
+              <div className="grid grid-cols-2 gap-4">
+                <select className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={resForm.block} onChange={e => setResForm({...resForm, block: e.target.value})}>
+                  {BLOCKS.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+                <input type="text" required placeholder="Unit" className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={resForm.houseNumber} onChange={e => setResForm({...resForm, houseNumber: e.target.value})} />
+              </div>
+              <input type="tel" required placeholder="WhatsApp..." className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-base focus:border-amber-500 transition-all" value={resForm.phoneNumber} onChange={e => setResForm({...resForm, phoneNumber: e.target.value})} />
+              <div className="bg-amber-50 p-6 rounded-[2rem] border border-amber-100">
+                 <p className="text-[10px] font-black text-amber-600 uppercase mb-2 tracking-widest">Login Warga:</p>
+                 <p className="text-xs font-bold text-slate-700 italic">PIN: wargatka123456</p>
+              </div>
+              <button type="submit" className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">SIMPAN DATABASE</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {isModalOpen === 'SECURITY' && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in">
+          <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl animate-slide-up">
+            <div className="p-10 bg-[#0F172A] text-white flex justify-between items-center rounded-t-[3rem]">
+              <h3 className="text-2xl font-black tracking-tight">{editingItem ? 'Edit Data Satpam' : 'Satpam Baru'}</h3>
+              <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
+            </div>
+            <form onSubmit={handleSaveSecurity} className="p-10 space-y-6">
+              <input type="text" required placeholder="Nama Lengkap..." className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-base focus:border-amber-500 transition-all" value={secForm.name} onChange={e => setSecForm({...secForm, name: e.target.value})} />
+              <input type="tel" required placeholder="WhatsApp Satpam..." className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-base focus:border-amber-500 transition-all" value={secForm.phoneNumber} onChange={e => setSecForm({...secForm, phoneNumber: e.target.value})} />
+              <div className="bg-amber-50 p-6 rounded-[2rem] border border-amber-100">
+                 <p className="text-[10px] font-black text-amber-600 uppercase mb-2 tracking-widest">Login Satpam:</p>
+                 <p className="text-xs font-bold text-slate-700 italic">PIN: 123456</p>
+              </div>
+              <button type="submit" className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">KONFIRMASI PETUGAS</button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {isModalOpen === 'GUEST' && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in">
           <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl animate-slide-up">
             <div className="p-10 bg-blue-600 text-white flex justify-between items-center rounded-t-[3rem]">
-              <h3 className="text-2xl font-black tracking-tight">Tamu Masuk Baru</h3>
+              <h3 className="text-2xl font-black tracking-tight">Data Tamu Masuk</h3>
               <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
             </div>
             <form onSubmit={addGuest} className="p-10 space-y-6">
               <input type="text" required placeholder="Nama Lengkap Tamu..." className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-base focus:border-blue-500 transition-all" value={guestForm.name} onChange={e => setGuestForm({...guestForm, name: e.target.value})} />
               <select required className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={guestForm.visitToId} onChange={e => setGuestForm({...guestForm, visitToId: e.target.value})}>
-                  <option value="">-- Pilih Tujuan Hunian --</option>
+                  <option value="">-- Pilih Tujuan --</option>
                   {db.residents.map(r => <option key={r.id} value={r.id}>Blok {r.block} No. {r.houseNumber} ({r.name})</option>)}
               </select>
-              <textarea required placeholder="Keperluan Berkunjung..." className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold min-h-[120px] text-base focus:border-blue-500 transition-all" value={guestForm.purpose} onChange={e => setGuestForm({...guestForm, purpose: e.target.value})} />
-              <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">KONFIRMASI PENDAFTARAN</button>
+              <textarea required placeholder="Keperluan..." className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold min-h-[120px] text-base focus:border-blue-500 transition-all" value={guestForm.purpose} onChange={e => setGuestForm({...guestForm, purpose: e.target.value})} />
+              <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">SIMPAN PENDAFTARAN</button>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL INCIDENT */}
+      {isModalOpen === 'SYNC_MODAL' && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in">
+          <div className="bg-white w-full max-w-2xl rounded-[3rem] shadow-2xl animate-slide-up overflow-hidden">
+            <div className="p-10 bg-slate-900 text-white flex justify-between items-center">
+              <div><h3 className="text-2xl font-black">Sync Master TKA</h3><p className="text-[10px] font-bold uppercase text-slate-400 mt-1">Full Database Migration Tool</p></div>
+              <button onClick={() => setIsModalOpen(null)} className="p-3 bg-white/10 rounded-2xl hover:bg-white/20 transition-all"><X size={28}/></button>
+            </div>
+            <div className="p-10 space-y-8">
+               <textarea 
+                className="w-full p-6 bg-slate-50 border-2 border-slate-100 rounded-2xl text-[10px] font-mono break-all outline-none focus:border-amber-500 transition-all min-h-[200px] shadow-inner" 
+                value={syncInput} onChange={e => setSyncInput(e.target.value)} placeholder="Kode master enkripsi akan muncul di sini..."
+               />
+               <div className="grid grid-cols-2 gap-4">
+                  <button onClick={() => { navigator.clipboard.writeText(syncInput); setIsCopied(true); setTimeout(() => setIsCopied(false), 2000); }} className="py-4 bg-slate-50 text-slate-600 border border-slate-200 rounded-2xl font-black text-[10px] uppercase flex items-center justify-center gap-2">
+                    {isCopied ? <Check size={18} className="text-green-500"/> : <Copy size={18}/>} {isCopied ? 'COPIED TO CLIPBOARD' : 'SALIN KODE MASTER'}
+                  </button>
+                  <button onClick={importData} className="py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase shadow-xl hover:bg-slate-800 active:scale-95 transition-all">APPLY DATABASE MASTER</button>
+               </div>
+               <div className="flex gap-3 bg-amber-50 p-5 rounded-2xl border border-amber-100 items-start">
+                  <Info size={20} className="text-amber-600 mt-1 flex-shrink-0" />
+                  <p className="text-[9px] font-bold text-amber-700 leading-relaxed uppercase italic">PENTING: Mengaplikasikan kode ini akan mengganti seluruh data di perangkat ini dengan data master terbaru.</p>
+               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isModalOpen === 'INCIDENT' && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in">
           <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl animate-slide-up">
             <div className="p-10 bg-red-600 text-white flex justify-between items-center rounded-t-[3rem]">
-              <h3 className="text-2xl font-black tracking-tight">Lapor Kejadian</h3>
+              <h3 className="text-2xl font-black tracking-tight">Pelaporan Kejadian</h3>
               <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
             </div>
             <form onSubmit={addIncident} className="p-10 space-y-5">
               <select required className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-base focus:border-red-500 transition-all" value={incForm.type} onChange={e => setIncForm({...incForm, type: e.target.value})}>
-                <option value="Kriminalitas">Kriminalitas / Pencurian</option>
+                <option value="Kriminalitas">Pencurian / Kriminal</option>
                 <option value="Kebakaran">Kebakaran / Asap</option>
-                <option value="Kecurigaan">Aktifitas Mencurigakan</option>
-                <option value="Fasilitas">Fasilitas Umum Rusak</option>
+                <option value="Aktivitas">Aktivitas Mencurigakan</option>
+                <option value="Infrastruktur">Kerusakan Fasilitas</option>
               </select>
-              <input type="text" required placeholder="Lokasi Spesifik (Misal: Belakang Lapangan)..." className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-base focus:border-red-500 transition-all" value={incForm.location} onChange={e => setIncForm({...incForm, location: e.target.value})} />
-              <textarea required placeholder="Jelaskan kronologi singkat..." className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold min-h-[150px] text-base focus:border-red-500 transition-all" value={incForm.description} onChange={e => setIncForm({...incForm, description: e.target.value})} />
+              <input type="text" required placeholder="Titik Lokasi..." className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-base focus:border-red-500 transition-all" value={incForm.location} onChange={e => setIncForm({...incForm, location: e.target.value})} />
+              <textarea required placeholder="Kronologi singkat..." className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold min-h-[150px] text-base focus:border-red-500 transition-all" value={incForm.description} onChange={e => setIncForm({...incForm, description: e.target.value})} />
               <button type="submit" disabled={isAnalyzing} className="w-full py-5 bg-red-600 text-white rounded-3xl font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-3">
-                {isAnalyzing ? <Clock size={20} className="animate-spin" /> : <Send size={20}/>} {isAnalyzing ? 'MENGANALISIS...' : 'KIRIM LAPORAN'}
+                {isAnalyzing ? <Clock size={20} className="animate-spin" /> : <Send size={20}/>} {isAnalyzing ? 'MENGANALISIS RISIKO...' : 'KIRIM LAPORAN'}
               </button>
             </form>
           </div>
@@ -711,12 +860,12 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in">
           <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl animate-slide-up overflow-hidden">
             <div className={`p-10 text-white flex justify-between items-center ${patrolAction.status === 'OK' ? 'bg-green-600' : 'bg-red-600'}`}>
-              <div><h3 className="text-2xl font-black tracking-tight">{patrolAction.cp}</h3><p className="text-[10px] font-black uppercase opacity-80 mt-1">Status Keamanan Area</p></div>
+              <div><h3 className="text-2xl font-black tracking-tight uppercase">{patrolAction.cp}</h3><p className="text-[10px] font-black uppercase opacity-80 mt-1">Verifikasi Kondisi Area</p></div>
               <button onClick={() => setPatrolAction(null)} className="p-3 bg-white/10 rounded-2xl hover:bg-white/20 transition-all"><X size={24}/></button>
             </div>
             <div className="p-10 space-y-8">
-               <p className="text-slate-600 font-medium text-center leading-relaxed">Anda menyatakan bahwa area <span className="font-black">{patrolAction.cp}</span> dalam kondisi <span className={`font-black ${patrolAction.status === 'OK' ? 'text-green-600' : 'text-red-600'}`}>{patrolAction.status === 'OK' ? 'AMAN & TERKONTROL' : 'MEMBUTUHKAN TINDAKAN'}</span>.</p>
-               <button onClick={() => submitPatrol(patrolAction.status)} className={`w-full py-5 text-white rounded-3xl font-black uppercase text-xs tracking-widest shadow-2xl transition-all active:scale-95 ${patrolAction.status === 'OK' ? 'bg-green-600 shadow-green-600/20' : 'bg-red-600 shadow-red-600/20'}`}>KONFIRMASI STATUS</button>
+               <p className="text-slate-600 font-medium text-center leading-relaxed italic">"Saya menyatakan area <span className="font-black">{patrolAction.cp}</span> dalam kondisi <span className={`font-black ${patrolAction.status === 'OK' ? 'text-green-600' : 'text-red-600'}`}>{patrolAction.status === 'OK' ? 'AMAN' : 'BUTUH PERHATIAN'}</span>"</p>
+               <button onClick={() => submitPatrol(patrolAction.status)} className={`w-full py-5 text-white rounded-3xl font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all ${patrolAction.status === 'OK' ? 'bg-green-600 shadow-green-600/20' : 'bg-red-600 shadow-red-600/20'}`}>SUBMIT DATA PATROLI</button>
             </div>
           </div>
         </div>
@@ -726,11 +875,11 @@ const App: React.FC = () => {
       {isModalOpen === 'SOS_MODAL' && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-red-600 animate-pulse">
            <div className="text-center text-white p-16">
-              <div className="bg-white text-red-600 w-32 h-32 rounded-full flex items-center justify-center mx-auto mb-10 shadow-[0_0_80px_rgba(255,255,255,0.6)]">
+              <div className="bg-white text-red-600 w-32 h-32 rounded-full flex items-center justify-center mx-auto mb-10 shadow-[0_0_100px_rgba(255,255,255,0.7)]">
                  <BellRing size={64} className="animate-bounce" />
               </div>
-              <h1 className="text-5xl font-black mb-6 tracking-tighter uppercase">SOS TERKIRIM!</h1>
-              <p className="text-xl font-bold opacity-90 leading-tight">Seluruh petugas keamanan Kawasan TKA<br/>sedang menuju lokasi Anda sekarang.</p>
+              <h1 className="text-5xl font-black mb-6 tracking-tighter uppercase">DARURAT TERKIRIM!</h1>
+              <p className="text-xl font-bold opacity-90 leading-tight">Seluruh tim satpam Kawasan TKA<br/>sedang dalam perjalanan ke lokasi.</p>
            </div>
         </div>
       )}

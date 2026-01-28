@@ -6,6 +6,7 @@ export interface User {
   name: string;
   role: UserRole;
   avatar?: string;
+  phoneNumber?: string;
 }
 
 export const ShiftType = {
@@ -69,16 +70,9 @@ export interface ChatMessage {
   timestamp: string;
 }
 
-export interface SecurityLocation {
-  userId: string;
-  userName: string;
-  latitude: number;
-  longitude: number;
-  lastUpdated: string;
-}
-
 export interface FullDatabase {
   residents: Resident[];
+  securityUsers: User[];
   guests: GuestLog[];
   incidents: IncidentReport[];
   patrolLogs: PatrolLog[];
