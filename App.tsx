@@ -13,7 +13,6 @@ import Layout from './components/Layout.tsx';
 import { 
   Shield, 
   Search, 
-  CheckCircle2, 
   Phone, 
   Send,
   Users,
@@ -33,19 +32,19 @@ import {
   Home,
   Settings,
   LogOut,
-  Filter,
-  Image as ImageIcon,
-  Check,
   Activity,
   MessageSquare,
   BookOpen,
-  ChevronRight,
   FileText,
   Sparkles,
   Download,
-  ToggleRight,
-  ToggleLeft,
-  Navigation
+  Navigation,
+  PhoneCall,
+  BellRing,
+  MoreVertical,
+  ChevronRight,
+  Map as MapIcon,
+  Settings2
 } from 'lucide-react';
 import { analyzeIncident, getSecurityBriefing, generateWeeklySummary } from './services/geminiService.ts';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
@@ -91,11 +90,12 @@ const App: React.FC = () => {
   });
 
   // UI States
-  const [isModalOpen, setIsModalOpen] = useState<'RESIDENT' | 'GUEST' | 'INCIDENT' | 'CHECKPOINT_MGR' | 'WEEKLY_REPORT' | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState<'RESIDENT' | 'GUEST' | 'INCIDENT' | 'CHECKPOINT_MGR' | 'WEEKLY_REPORT' | 'SOS_MODAL' | null>(null);
   const [editingItem, setEditingItem] = useState<any>(null);
   const [residentForm, setResidentForm] = useState<Partial<Resident>>({ name: '', houseNumber: '', block: BLOCKS[0], phoneNumber: '', isHome: true });
   const [guestForm, setGuestForm] = useState<Partial<GuestLog>>({ name: '', visitToId: '', purpose: '', photo: '' });
   const [incidentForm, setIncidentForm] = useState({ type: 'Kriminalitas', location: '', description: '', photo: '' });
+  const [checkpointForm, setCheckpointForm] = useState({ name: '', oldName: '' });
   const [patrolActionState, setPatrolActionState] = useState<{checkpoint: string, status: 'OK' | 'WARNING' | 'DANGER'} | null>(null);
   const [patrolActionPhoto, setPatrolActionPhoto] = useState<string>('');
   const [patrolActionNote, setPatrolActionNote] = useState<string>('');
@@ -107,12 +107,11 @@ const App: React.FC = () => {
   const [weeklyReportContent, setWeeklyReportContent] = useState<string>('');
   const [securityBriefing, setSecurityBriefing] = useState<string>('');
   const [residentSearch, setResidentSearch] = useState('');
-  const [newCheckpointName, setNewCheckpointName] = useState('');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Sync Persistence
+  // Sync Persistence to LocalStorage
   useEffect(() => {
     localStorage.setItem('tka_guests', JSON.stringify(guests));
     localStorage.setItem('tka_incidents', JSON.stringify(incidents));
@@ -150,10 +149,7 @@ const App: React.FC = () => {
     } else if (currentUser?.role === 'SECURITY') {
       setSecurityLocations(prev => prev.filter(l => l.userId !== currentUser.id));
     }
-
-    return () => {
-      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
-    };
+    return () => { if (watchId !== null) navigator.geolocation.clearWatch(watchId); };
   }, [isGpsEnabled, currentUser]);
 
   useEffect(() => {
@@ -199,22 +195,29 @@ const App: React.FC = () => {
       setLoginError('');
       setPasswordInput('');
     } else {
-      setLoginError('Akses Ditolak: PIN tidak sesuai.');
+      setLoginError('PIN Keamanan Salah!');
     }
   };
 
-  const handleGenerateReport = async () => {
-    setIsGeneratingReport(true);
-    setIsModalOpen('WEEKLY_REPORT');
-    const stats = {
-      totalPatrols: patrolLogs.length,
-      totalIncidents: incidents.length,
-      highSeverityIncidents: incidents.filter(i => i.severity === 'HIGH').length,
-      averageOccupancy: Math.round((residents.filter(r => r.isHome).length / residents.length) * 100)
-    };
-    const report = await generateWeeklySummary(stats);
-    setWeeklyReportContent(report);
-    setIsGeneratingReport(false);
+  const handleSaveCheckpoint = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (checkpointForm.oldName) {
+      // Edit mode
+      setCheckpoints(prev => prev.map(cp => cp === checkpointForm.oldName ? checkpointForm.name : cp));
+    } else {
+      // Add mode
+      if (!checkpoints.includes(checkpointForm.name)) {
+        setCheckpoints(prev => [...prev, checkpointForm.name]);
+      }
+    }
+    setIsModalOpen(null);
+    setCheckpointForm({ name: '', oldName: '' });
+  };
+
+  const handleDeleteCheckpoint = (name: string) => {
+    if (confirm(`Hapus pos patroli "${name}"?`)) {
+      setCheckpoints(prev => prev.filter(cp => cp !== name));
+    }
   };
 
   const handleSaveResident = (e: React.FormEvent) => {
@@ -315,53 +318,57 @@ const App: React.FC = () => {
     setChatInput('');
   };
 
-  const addCheckpoint = () => {
-    if (newCheckpointName.trim() && !checkpoints.includes(newCheckpointName.trim())) {
-      setCheckpoints(prev => [...prev, newCheckpointName.trim()]);
-      setNewCheckpointName('');
-    }
+  const handleEmergencySOS = () => {
+    if (!currentUser) return;
+    const sosIncident: IncidentReport = {
+      id: `SOS-${Date.now()}`,
+      reporterId: currentUser.id,
+      reporterName: currentUser.name,
+      timestamp: new Date().toISOString(),
+      type: 'EMERGENCY / SOS',
+      location: 'Sesuai Data Warga',
+      description: `SINYAL DARURAT DIKIRIM OLEH ${currentUser.name.toUpperCase()}. MEMBUTUHKAN BANTUAN SEGERA!`,
+      status: 'PENDING',
+      severity: 'HIGH'
+    };
+    setIncidents(prev => [sosIncident, ...prev]);
+    setIsModalOpen('SOS_MODAL');
+    setTimeout(() => setIsModalOpen(null), 3000);
   };
 
-  const deleteCheckpoint = (name: string) => {
-    if (confirm(`Hapus checkpoint "${name}"?`)) setCheckpoints(prev => prev.filter(cp => cp !== name));
-  };
-
-  // Views
+  // Views rendering
   if (!currentUser) {
     const userPool = loginTab === 'SECURITY' ? SECURITY_USERS : loginTab === 'ADMIN' ? ADMIN_USERS : RESIDENT_USERS;
     return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 md:p-12">
-        <div className="bg-white w-full max-w-[1000px] flex flex-col md:flex-row rounded-[3rem] shadow-2xl overflow-hidden animate-slide-up">
-          <div className="w-full md:w-5/12 bg-[#0F172A] p-10 md:p-16 flex flex-col justify-between text-white relative">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/10 rounded-full blur-[100px] -mr-32 -mt-32"></div>
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
+        <div className="bg-white w-full max-w-[1000px] flex flex-col md:flex-row rounded-[2.5rem] shadow-2xl overflow-hidden animate-slide-up">
+          <div className="w-full md:w-5/12 bg-[#0F172A] p-10 flex flex-col justify-between text-white">
             <div>
-              <div className="bg-amber-500 w-16 h-16 rounded-3xl flex items-center justify-center mb-10 shadow-xl shadow-amber-500/30">
-                <Shield size={36} className="text-slate-900" />
+              <div className="bg-amber-500 w-16 h-16 rounded-3xl flex items-center justify-center mb-8 shadow-xl shadow-amber-500/20">
+                <Shield size={32} className="text-slate-900" />
               </div>
-              <h1 className="text-4xl lg:text-5xl font-black tracking-tighter leading-none mb-8">TKA SECURE<br/>SYSTEM</h1>
-              <p className="text-slate-400 font-medium italic text-sm leading-relaxed opacity-70">
-                Solusi Keamanan Terpadu Kawasan TKA.<br/>Shift Kerja 12 Jam (Pagi & Malam).
+              <h1 className="text-4xl font-black leading-tight mb-6">TKA SECURE<br/>SYSTEM</h1>
+              <p className="text-slate-400 text-sm leading-relaxed opacity-80">
+                Sistem Keamanan Terintegrasi Kawasan TKA.<br/>Layanan Shift 24 Jam Pagi & Malam.
               </p>
             </div>
             <div className="pt-8 border-t border-slate-800 flex items-center gap-3">
-               <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse shadow-[0_0_15px_rgba(34,197,94,0.4)]"></div>
-               <span className="text-xs font-black uppercase tracking-widest text-slate-500">System Monitoring Active</span>
+               <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse"></div>
+               <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Live Server Connected</span>
             </div>
           </div>
 
-          <div className="w-full md:w-7/12 p-8 md:p-16 bg-white flex flex-col justify-center">
-            <div className="mb-10 text-center md:text-left">
-              <h2 className="text-3xl font-black text-slate-900 tracking-tight mb-2">Login Portal</h2>
-              <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Akses Portal Keamanan Perumahan</p>
-            </div>
+          <div className="w-full md:w-7/12 p-8 md:p-12 bg-white">
+            <h2 className="text-3xl font-black text-slate-900 mb-2">Portal Login</h2>
+            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-8">Pilih identitas untuk mengakses sistem</p>
 
-            <div className="flex p-1 bg-slate-100 rounded-2xl mb-10">
+            <div className="flex bg-slate-100 p-1.5 rounded-2xl mb-8">
               {(['SECURITY', 'ADMIN', 'RESIDENT'] as const).map((tab) => (
                 <button 
                   key={tab} 
                   onClick={() => { setLoginTab(tab); setSelectedUser(null); setLoginError(''); }}
-                  className={`flex-1 py-3.5 text-[10px] md:text-xs font-black uppercase tracking-widest rounded-xl transition-all ${
-                    loginTab === tab ? 'bg-white text-slate-900 shadow-xl scale-[1.02]' : 'text-slate-400 hover:text-slate-600'
+                  className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all ${
+                    loginTab === tab ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'
                   }`}
                 >
                   {tab === 'SECURITY' ? 'Satpam' : tab === 'ADMIN' ? 'Admin' : 'Warga'}
@@ -370,48 +377,47 @@ const App: React.FC = () => {
             </div>
 
             <form onSubmit={handleAttemptLogin} className="space-y-6">
-              <div className="grid grid-cols-1 gap-3 max-h-[250px] overflow-y-auto pr-2 no-scrollbar p-1">
+              <div className="grid grid-cols-1 gap-2 max-h-[200px] overflow-y-auto no-scrollbar pr-1">
                 {userPool.map((u) => (
                   <button 
                     key={u.id}
                     type="button"
                     onClick={() => { setSelectedUser(u); setLoginError(''); }}
-                    className={`flex items-center gap-4 p-5 rounded-3xl border-2 transition-all text-left ${
-                      selectedUser?.id === u.id ? 'border-amber-500 bg-amber-50 shadow-lg' : 'border-slate-50 hover:border-slate-200 bg-slate-50/50'
+                    className={`flex items-center gap-4 p-4 rounded-2xl border-2 transition-all text-left ${
+                      selectedUser?.id === u.id ? 'border-amber-500 bg-amber-50' : 'border-slate-50 bg-slate-50'
                     }`}
                   >
-                    <div className="w-12 h-12 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-black text-lg">
+                    <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center font-black">
                       {u.name.charAt(0)}
                     </div>
                     <div className="flex-1">
                       <p className="font-black text-slate-900 text-sm">{u.name}</p>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{u.role}</p>
+                      <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">{u.role}</p>
                     </div>
-                    {selectedUser?.id === u.id && <Check className="text-amber-600" size={20}/>}
+                    {selectedUser?.id === u.id && <CheckCircle size={20} className="text-amber-500"/>}
                   </button>
                 ))}
               </div>
 
               {selectedUser && (
-                <div className="animate-slide-up space-y-6 pt-4 border-t border-slate-50">
-                  <div className="relative group">
-                    <Lock className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-amber-500 transition-colors" size={24}/>
+                <div className="space-y-4 pt-4 animate-slide-up">
+                  <div className="relative">
+                    <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={20}/>
                     <input 
                       type="password" 
                       required 
-                      autoFocus
-                      placeholder="Input PIN Keamanan..."
-                      className="w-full pl-16 pr-8 py-5 rounded-[2rem] bg-slate-50 border-2 border-slate-100 focus:border-amber-500 outline-none font-black text-slate-900 text-lg transition-all shadow-inner tracking-[0.3em]" 
+                      placeholder="Input PIN Keamanan"
+                      className="w-full pl-14 pr-6 py-4 rounded-2xl bg-slate-50 border-2 border-slate-100 focus:border-amber-500 outline-none font-black text-lg tracking-widest" 
                       value={passwordInput} 
                       onChange={e => setPasswordInput(e.target.value)} 
                     />
                   </div>
-                  {loginError && <p className="text-red-500 text-xs font-black uppercase text-center bg-red-50 py-3 rounded-xl border border-red-100">{loginError}</p>}
+                  {loginError && <p className="text-red-500 text-[10px] font-black uppercase text-center">{loginError}</p>}
                   <button 
                     type="submit" 
-                    className="w-full bg-slate-900 text-white font-black py-6 rounded-[2rem] shadow-2xl hover:bg-slate-800 hover:-translate-y-1 transition-all active:scale-[0.98] flex items-center justify-center gap-4 text-sm tracking-widest uppercase"
+                    className="w-full bg-slate-900 text-white font-black py-4 rounded-2xl hover:bg-slate-800 transition-all flex items-center justify-center gap-3 text-xs uppercase tracking-widest"
                   >
-                    Masuk Sekarang <ArrowRight size={22} />
+                    Masuk Sekarang <ArrowRight size={18} />
                   </button>
                 </div>
               )}
@@ -425,31 +431,24 @@ const App: React.FC = () => {
   return (
     <Layout user={currentUser} onLogout={handleLogout} activeTab={activeTab} setActiveTab={setActiveTab}>
       
+      {/* DASHBOARD */}
       {activeTab === 'dashboard' && (
-        <div className="space-y-8 animate-slide-up">
-          {currentUser.role === 'ADMIN' && (
-            <div className="bg-white p-6 md:p-8 rounded-[2rem] md:rounded-[3rem] shadow-sm border border-slate-100 mb-8">
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-lg font-black text-slate-900 flex items-center gap-3"><Navigation size={24} className="text-blue-500"/> Live GPS Monitor</h3>
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Tracking Satpam</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {SECURITY_USERS.map(sec => {
-                  const loc = securityLocations.find(l => l.userId === sec.id);
-                  return (
-                    <div key={sec.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between shadow-sm">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center font-black text-sm">{sec.name.charAt(0)}</div>
-                        <div>
-                          <p className="text-xs font-black text-slate-900 leading-none mb-1">{sec.name}</p>
-                          <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{loc ? 'Sinyal Aktif' : 'Sinyal Off'}</p>
-                        </div>
-                      </div>
-                      {loc && <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse"></div>}
-                    </div>
-                  );
-                })}
-              </div>
+        <div className="space-y-6 animate-slide-up">
+          {currentUser.role === 'RESIDENT' && (
+            <div className="bg-red-600 p-6 md:p-8 rounded-[2rem] text-white shadow-xl shadow-red-200 flex flex-col md:flex-row justify-between items-center gap-6 mb-8">
+               <div className="flex items-center gap-6">
+                 <div className="bg-white/20 p-4 rounded-3xl backdrop-blur-sm"><BellRing size={32} className="animate-bounce" /></div>
+                 <div>
+                    <h3 className="text-xl font-black mb-1">Butuh Bantuan Mendesak?</h3>
+                    <p className="text-xs text-red-100 font-medium opacity-90">Tekan tombol SOS untuk memanggil tim keamanan terdekat ke lokasi Anda.</p>
+                 </div>
+               </div>
+               <button 
+                onClick={handleEmergencySOS}
+                className="bg-white text-red-600 px-10 py-4 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl hover:scale-105 active:scale-95 transition-transform whitespace-nowrap"
+               >
+                 Panggil SOS
+               </button>
             </div>
           )}
 
@@ -457,145 +456,236 @@ const App: React.FC = () => {
             {[
               { label: 'Total Patroli', val: patrolLogs.length, icon: <Activity size={24}/>, color: 'amber' },
               { label: 'Insiden Aktif', val: incidents.filter(i => i.status !== 'RESOLVED').length, icon: <AlertTriangle size={24}/>, color: 'red' },
-              { label: 'Tamu Hari Ini', val: guests.filter(g => g.status === 'IN').length, icon: <Users size={24}/>, color: 'blue' },
-              { label: 'Warga Di Area', val: residents.filter(r => r.isHome).length, icon: <Home size={24}/>, color: 'green' }
+              { label: 'Tamu Terdaftar', val: guests.filter(g => g.status === 'IN').length, icon: <Users size={24}/>, color: 'blue' },
+              { label: 'Warga Di Unit', val: residents.filter(r => r.isHome).length, icon: <Home size={24}/>, color: 'green' }
             ].map((stat, i) => (
-              <div key={i} className="bg-white p-5 md:p-7 rounded-[1.5rem] md:rounded-[2.5rem] shadow-sm border border-slate-100 transition-all hover:shadow-lg">
-                <div className={`w-10 h-10 md:w-14 md:h-14 rounded-2xl flex items-center justify-center mb-3 md:mb-5 ${
+              <div key={i} className="bg-white p-5 md:p-7 rounded-3xl shadow-sm border border-slate-100">
+                <div className={`w-10 h-10 md:w-12 md:h-12 rounded-xl flex items-center justify-center mb-4 ${
                   stat.color === 'amber' ? 'bg-amber-50 text-amber-600' : 
                   stat.color === 'red' ? 'bg-red-50 text-red-600' : 
                   stat.color === 'blue' ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600'
                 }`}>{stat.icon}</div>
-                <h3 className="text-slate-400 text-[9px] md:text-[11px] font-black uppercase tracking-widest mb-1">{stat.label}</h3>
-                <p className="text-xl md:text-3xl font-black text-slate-900 tracking-tighter">{stat.val}</p>
+                <h3 className="text-slate-400 text-[9px] font-black uppercase tracking-widest mb-1">{stat.label}</h3>
+                <p className="text-2xl font-black text-slate-900 tracking-tighter">{stat.val}</p>
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2 bg-white p-6 md:p-10 rounded-[2rem] md:rounded-[3rem] shadow-sm border border-slate-100 flex flex-col">
-              <div className="flex justify-between items-center mb-10">
-                <h3 className="text-xl font-black text-slate-900 flex items-center gap-3">
-                  <TrendingUp size={24} className="text-amber-500"/> Ringkasan Area
-                </h3>
-              </div>
-              <div className="h-[250px] md:h-[350px] w-full">
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 bg-white p-6 md:p-10 rounded-[2.5rem] shadow-sm border border-slate-100">
+              <h3 className="text-lg font-black text-slate-900 mb-8 flex items-center gap-3">
+                <TrendingUp size={22} className="text-amber-500"/> Tren Keamanan Blok
+              </h3>
+              <div className="h-[250px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94A3B8', fontSize: 10, fontWeight: 800}} />
-                    <YAxis axisLine={false} tickLine={false} tick={{fill: '#94A3B8', fontSize: 10, fontWeight: 800}} />
-                    <Tooltip cursor={{fill: '#F8FAFC'}} contentStyle={{borderRadius: '15px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)'}} />
-                    <Bar dataKey="incidents" radius={[8, 8, 8, 8]} barSize={35}>
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94A3B8', fontSize: 10}} />
+                    <Tooltip cursor={{fill: '#F8FAFC'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
+                    <Bar dataKey="incidents" radius={[6, 6, 6, 6]} barSize={35}>
                       {chartData.map((_, index) => (<Cell key={index} fill={['#F59E0B', '#3B82F6', '#10B981'][index % 3]} />))}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
             </div>
-            <div className="bg-slate-900 text-white p-8 md:p-10 rounded-[2rem] md:rounded-[3rem] shadow-2xl relative overflow-hidden flex flex-col justify-between min-h-[300px]">
-              <div className="absolute top-0 right-0 w-48 h-48 bg-amber-500/10 rounded-full blur-[80px] -mr-24 -mt-24"></div>
+            <div className="bg-slate-900 text-white p-8 md:p-10 rounded-[2.5rem] flex flex-col justify-between">
               <div>
-                <div className="flex items-center gap-4 mb-6">
-                  <Shield size={32} className="text-amber-500"/>
-                  <h3 className="font-black text-xl md:text-2xl tracking-tight">Status Shift</h3>
+                <div className="flex items-center gap-3 mb-6">
+                  <Shield size={28} className="text-amber-500"/>
+                  <h3 className="font-black text-xl">Briefing</h3>
                 </div>
-                <p className="text-slate-400 text-sm md:text-base italic leading-relaxed font-medium">"{securityBriefing || 'Menyiapkan briefing untuk petugas...'}"</p>
+                <p className="text-slate-400 text-sm italic font-medium">"{securityBriefing || 'Mengambil data briefing...'}"</p>
               </div>
               <button 
-                onClick={() => setActiveTab(currentUser?.role === 'RESIDENT' ? 'reports' : 'patrol')} 
-                className="w-full bg-amber-500 text-slate-900 font-black py-4 rounded-2xl mt-8 shadow-xl text-sm flex items-center justify-center gap-3 active:scale-95 transition-transform"
+                onClick={() => setActiveTab(currentUser?.role === 'RESIDENT' ? 'incident' : 'patrol')} 
+                className="w-full bg-amber-500 text-slate-900 font-black py-4 rounded-xl mt-8 text-xs uppercase tracking-widest flex items-center justify-center gap-2"
               >
-                {currentUser?.role === 'RESIDENT' ? 'Lihat Laporan' : 'Mulai Tugas'} <ArrowRight size={22}/>
+                {currentUser?.role === 'RESIDENT' ? 'Lapor Kejadian' : 'Mulai Tugas'} <ArrowRight size={18}/>
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {activeTab === 'settings' && (
-        <div className="max-w-4xl mx-auto space-y-8 animate-slide-up pb-32">
-          <div className="bg-white p-8 md:p-10 rounded-[2rem] md:rounded-[3rem] shadow-sm border border-slate-100 overflow-hidden">
-            <h3 className="text-xl md:text-2xl font-black text-slate-900 mb-8 flex items-center gap-3"><Settings size={28} className="text-slate-400"/> Pengaturan Sistem</h3>
-            <div className="space-y-10">
-              <div className="flex flex-col md:flex-row gap-6 md:gap-8 items-center md:items-start text-center md:text-left">
-                <div className="w-20 h-20 md:w-24 md:h-24 rounded-[1.5rem] bg-slate-900 text-white flex items-center justify-center text-3xl font-black shadow-xl">
-                  {currentUser.name.charAt(0)}
+      {/* PATROL TAB */}
+      {activeTab === 'patrol' && (
+        <div className="space-y-6 animate-slide-up pb-20">
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="text-2xl font-black text-slate-900">Kendali Patroli</h3>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Manajemen Pos Keamanan</p>
+            </div>
+            {currentUser.role === 'ADMIN' && (
+              <button 
+                onClick={() => { setCheckpointForm({ name: '', oldName: '' }); setIsModalOpen('CHECKPOINT_MGR'); }}
+                className="bg-slate-900 text-white px-5 py-3 rounded-xl font-black text-[10px] uppercase flex items-center gap-2 active:scale-95 shadow-lg transition-all"
+              >
+                <Plus size={18}/> TAMBAH POS
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {checkpoints.map((cp, idx) => {
+              const lastLog = patrolLogs.filter(log => log.checkpoint === cp)[0];
+              return (
+                <div key={idx} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-between hover:shadow-md transition-all group">
+                  <div className="flex justify-between items-start mb-6">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-black text-lg group-hover:scale-110 transition-transform">
+                      {idx + 1}
+                    </div>
+                    <div className="flex gap-2">
+                       {currentUser.role === 'ADMIN' && (
+                         <>
+                            <button onClick={() => { setCheckpointForm({ name: cp, oldName: cp }); setIsModalOpen('CHECKPOINT_MGR'); }} className="p-2 text-slate-300 hover:text-blue-500 transition-colors"><Edit2 size={16}/></button>
+                            <button onClick={() => handleDeleteCheckpoint(cp)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16}/></button>
+                         </>
+                       )}
+                       {lastLog && (
+                        <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${lastLog.status === 'OK' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+                          {lastLog.status}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <h4 className="text-lg font-black text-slate-900 mb-8">{cp}</h4>
+                  
+                  {currentUser.role === 'SECURITY' && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <button 
+                        onClick={() => setPatrolActionState({ checkpoint: cp, status: 'OK' })}
+                        className="py-3 bg-green-500 text-white rounded-xl font-black text-[10px] uppercase flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all"
+                      >
+                        <CheckCircle size={16}/> Aman
+                      </button>
+                      <button 
+                        onClick={() => setPatrolActionState({ checkpoint: cp, status: 'WARNING' })}
+                        className="py-3 bg-red-600 text-white rounded-xl font-black text-[10px] uppercase flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all"
+                      >
+                        <AlertTriangle size={16}/> Bahaya
+                      </button>
+                    </div>
+                  )}
+                  {currentUser.role === 'ADMIN' && lastLog && (
+                    <div className="pt-4 border-t border-slate-50">
+                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Update Terakhir:</p>
+                       <p className="text-[9px] font-black text-slate-700">{lastLog.securityName} - {new Date(lastLog.timestamp).toLocaleString()}</p>
+                    </div>
+                  )}
                 </div>
-                <div className="flex-1 space-y-2">
-                  <h4 className="text-xl font-black text-slate-900 leading-none">{currentUser.name}</h4>
-                  <p className="text-xs font-black text-amber-600 uppercase tracking-widest">{currentUser.role} AREA TKA</p>
-                  <p className="text-xs text-slate-400 font-medium">ID: {currentUser.id}</p>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* REPORTS TAB (Resident Specific) */}
+      {activeTab === 'reports' && (
+        <div className="space-y-6 animate-slide-up pb-20">
+          <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+            <h3 className="text-2xl font-black text-slate-900 mb-2">Laporan Kawasan</h3>
+            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-8">Informasi Keamanan untuk Warga</p>
+            
+            <div className="space-y-8">
+              <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100">
+                <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <Activity size={18} className="text-blue-500"/> Status Patroli Terakhir
+                </h4>
+                <div className="space-y-3">
+                  {patrolLogs.slice(0, 3).map(log => (
+                    <div key={log.id} className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-100">
+                      <div className="flex items-center gap-3">
+                        <MapPin size={14} className="text-slate-400"/>
+                        <span className="text-xs font-bold text-slate-700">{log.checkpoint}</span>
+                      </div>
+                      <span className="text-[10px] font-black text-slate-400">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
 
-              {currentUser.role === 'SECURITY' && (
-                <div className="p-6 md:p-8 bg-slate-50 rounded-[1.5rem] md:rounded-[2.5rem] border border-slate-100">
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
-                    <div className="space-y-1.5 text-center sm:text-left">
-                      <div className="flex items-center justify-center sm:justify-start gap-2 mb-1">
-                        <Navigation size={20} className="text-blue-500"/>
-                        <h5 className="font-black text-slate-900 uppercase text-xs tracking-widest">Aktivasi GPS Petugas</h5>
-                      </div>
-                      <p className="text-xs md:text-sm text-slate-500 font-medium max-w-md leading-relaxed">Nyalakan fitur ini agar Admin dapat melihat lokasi Anda di dashboard secara real-time.</p>
-                    </div>
-                    <button 
-                      onClick={() => setIsGpsEnabled(!isGpsEnabled)}
-                      className={`relative w-14 h-8 md:w-16 md:h-10 rounded-full transition-all duration-300 p-1.5 flex items-center flex-shrink-0 ${isGpsEnabled ? 'bg-green-500' : 'bg-slate-300'}`}
-                    >
-                      <div className={`w-5 h-5 md:w-7 md:h-7 bg-white rounded-full shadow-lg transition-transform duration-300 transform ${isGpsEnabled ? 'translate-x-6 md:translate-x-7' : 'translate-x-0'}`}></div>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <div className="pt-8 border-t border-slate-100 flex flex-col gap-4">
-                <button onClick={handleLogout} className="w-full py-4 bg-red-50 text-red-600 rounded-[1.5rem] font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-3 active:scale-95 transition-transform shadow-sm">
-                  <LogOut size={18}/> Keluar Aplikasi
-                </button>
+              <div className="p-6 bg-amber-50 rounded-2xl border border-amber-100">
+                <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <Sparkles size={18} className="text-amber-500"/> Ringkasan Keamanan (AI)
+                </h4>
+                <p className="text-xs md:text-sm text-slate-700 leading-relaxed font-medium italic">
+                  "Sistem mendeteksi aktivitas patroli berjalan normal. Area gerbang utama dipantau lebih ketat karena volume tamu yang meningkat hari ini. Tetap waspada dan pastikan pagar terkunci saat malam hari."
+                </p>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {activeTab === 'chat' && (
-        <div className="max-w-4xl mx-auto h-[calc(100vh-250px)] md:h-[calc(100vh-220px)] flex flex-col animate-slide-up pb-10">
-           <div className="flex-1 bg-white rounded-t-[2rem] md:rounded-t-[3rem] shadow-sm border border-slate-100 overflow-y-auto p-5 md:p-12 space-y-6 no-scrollbar shadow-inner">
-              {chatMessages.length > 0 ? chatMessages.map((msg) => (
-                <div key={msg.id} className={`flex ${msg.senderId === currentUser?.id ? 'justify-end' : 'justify-start'}`}>
-                   <div className={`max-w-[85%] md:max-w-[75%] p-5 rounded-[1.8rem] md:rounded-[2rem] shadow-sm ${msg.senderId === currentUser?.id ? 'bg-slate-900 text-white rounded-tr-none' : 'bg-slate-50 text-slate-900 rounded-tl-none border border-slate-100'}`}>
-                      <div className="flex justify-between items-center gap-4 mb-2">
-                        <span className="text-[9px] font-black uppercase tracking-widest opacity-60">{msg.senderName}</span>
-                      </div>
-                      <p className="text-xs md:text-sm font-medium leading-relaxed">{msg.text}</p>
-                      <p className="text-[8px] mt-2 opacity-40 text-right">{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
-                   </div>
+      {/* INCIDENT TAB */}
+      {activeTab === 'incident' && (
+        <div className="space-y-6 animate-slide-up pb-20">
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="text-2xl font-black text-slate-900">Log Insiden</h3>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Pantau & Lapor Kejadian</p>
+            </div>
+            <button 
+              onClick={() => setIsModalOpen('INCIDENT')}
+              className="bg-red-600 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase flex items-center gap-2 active:scale-95 shadow-xl transition-all"
+            >
+              <AlertTriangle size={18}/> LAPOR KEJADIAN
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {incidents.length > 0 ? incidents.map(inc => (
+              <div key={inc.id} className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden flex flex-col justify-between hover:shadow-lg transition-all">
+                <div className={`absolute top-0 right-0 w-32 h-32 blur-[60px] opacity-10 ${inc.severity === 'HIGH' ? 'bg-red-500' : 'bg-amber-500'}`}></div>
+                <div>
+                  <div className="flex justify-between items-start mb-6">
+                    <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${inc.severity === 'HIGH' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'}`}>
+                      {inc.severity} Severity
+                    </span>
+                    <span className="text-[10px] font-black text-slate-400 uppercase">{new Date(inc.timestamp).toLocaleDateString()}</span>
+                  </div>
+                  <h4 className="text-xl font-black text-slate-900 mb-2">{inc.type}</h4>
+                  <p className="text-xs text-slate-400 font-bold mb-4 flex items-center gap-1"><MapPin size={12}/> {inc.location}</p>
+                  <p className="text-sm text-slate-600 leading-relaxed mb-8 italic">"{inc.description}"</p>
                 </div>
-              )) : <div className="h-full flex items-center justify-center text-slate-300 italic font-bold">Belum ada percakapan...</div>}
-              <div ref={chatEndRef} />
-           </div>
-           <form onSubmit={handleSendChat} className="bg-white p-4 md:p-6 rounded-b-[2.5rem] md:rounded-b-[3rem] border-t border-slate-100 shadow-md flex gap-3 flex-shrink-0 mb-16 md:mb-0">
-              <input type="text" placeholder="Tulis pesan..." className="flex-1 px-5 py-4 md:py-5 rounded-[1.5rem] md:rounded-[2rem] bg-slate-50 border-2 border-slate-100 focus:border-amber-500 outline-none font-bold transition-all shadow-inner text-sm" value={chatInput} onChange={e => setChatInput(e.target.value)} />
-              <button type="submit" className="bg-slate-900 text-white p-4 md:p-5 rounded-[1.5rem] md:rounded-[2rem] shadow-xl hover:scale-105 active:scale-95 transition-all"><Send size={20}/></button>
-           </form>
+                <div className="flex items-center justify-between pt-6 border-t border-slate-50">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-black text-[10px] uppercase">{inc.reporterName.charAt(0)}</div>
+                    <div>
+                      <p className="text-[10px] font-black text-slate-900 leading-none mb-1">{inc.reporterName}</p>
+                      <p className="text-[8px] text-slate-400 font-bold uppercase">Pelapor</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black text-slate-400 uppercase">Status:</span>
+                    <span className={`text-[10px] font-black uppercase tracking-widest ${inc.status === 'RESOLVED' ? 'text-green-500' : 'text-amber-500'}`}>{inc.status}</span>
+                  </div>
+                </div>
+              </div>
+            )) : (
+              <div className="lg:col-span-2 py-20 bg-white rounded-[2.5rem] border border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-300">
+                <Activity size={48} className="mb-4 opacity-20"/>
+                <p className="font-bold text-sm uppercase tracking-widest">Belum ada laporan insiden hari ini</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Tab Warga */}
+      {/* TAB WARGA (DATABASE) */}
       {activeTab === 'residents' && (
-        <div className="max-w-7xl mx-auto space-y-8 animate-slide-up pb-32">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="space-y-6 animate-slide-up pb-20">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h3 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">Database Warga</h3>
-              <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Daftar Hunian Kawasan TKA</p>
+              <h3 className="text-2xl font-black text-slate-900">Database Warga</h3>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Informasi Hunian Area TKA</p>
             </div>
             <div className="flex gap-3">
-              <div className="relative flex-1 md:w-64">
+              <div className="relative">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18}/>
                 <input 
                   type="text" 
                   placeholder="Cari..." 
-                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-white border border-slate-200 outline-none font-medium text-sm shadow-sm" 
+                  className="pl-12 pr-4 py-3 rounded-xl bg-white border border-slate-200 text-sm focus:border-amber-500 outline-none" 
                   value={residentSearch} 
                   onChange={e => setResidentSearch(e.target.value)} 
                 />
@@ -603,7 +693,7 @@ const App: React.FC = () => {
               {currentUser.role === 'ADMIN' && (
                 <button 
                   onClick={() => { setEditingItem(null); setIsModalOpen('RESIDENT'); }}
-                  className="bg-slate-900 text-white p-3 rounded-xl shadow-lg active:scale-95 transition-transform"
+                  className="bg-slate-900 text-white p-3 rounded-xl shadow-lg active:scale-95 transition-all"
                 >
                   <Plus size={24}/>
                 </button>
@@ -615,26 +705,25 @@ const App: React.FC = () => {
             {residents
               .filter(r => r.name.toLowerCase().includes(residentSearch.toLowerCase()) || r.houseNumber.includes(residentSearch))
               .map(res => (
-                <div key={res.id} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group hover:shadow-md transition-all">
-                  <div className="flex justify-between items-start mb-4">
-                    <div className="w-12 h-12 rounded-xl bg-slate-50 text-slate-900 border border-slate-100 flex items-center justify-center font-black text-lg">
-                      {res.block}
+                <div key={res.id} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-between hover:shadow-md transition-all">
+                  <div>
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="w-10 h-10 rounded-xl bg-slate-50 text-slate-900 flex items-center justify-center font-black text-sm border border-slate-100">{res.block}</div>
+                      <span className={`px-2.5 py-1 rounded-full text-[8px] font-black uppercase ${res.isHome ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-400'}`}>
+                        {res.isHome ? 'DI UNIT' : 'LUAR AREA'}
+                      </span>
                     </div>
-                    <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${res.isHome ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-400'}`}>
-                      {res.isHome ? 'DI UNIT' : 'Luar Area'}
-                    </span>
+                    <h4 className="font-black text-slate-900 leading-tight">{res.name}</h4>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Unit: <span className="text-slate-900">{res.houseNumber}</span></p>
                   </div>
-                  <h4 className="font-black text-slate-900 text-base leading-tight">{res.name}</h4>
-                  <p className="text-[10px] text-slate-400 font-bold mt-1">Unit: <span className="text-slate-900">{res.houseNumber}</span></p>
-                  
                   <div className="mt-6 flex gap-2">
-                    <a href={`tel:${res.phoneNumber}`} className="flex-1 py-3 bg-green-500 text-white rounded-xl flex items-center justify-center shadow-md active:scale-95 transition-transform">
+                    <a href={`tel:${res.phoneNumber}`} className="flex-1 py-3 bg-green-500 text-white rounded-xl flex items-center justify-center shadow-md active:scale-95 transition-all">
                       <Phone size={18}/>
                     </a>
                     {currentUser.role === 'ADMIN' && (
                       <button 
                         onClick={() => { setEditingItem(res); setResidentForm(res); setIsModalOpen('RESIDENT'); }}
-                        className="p-3 bg-slate-50 text-slate-400 rounded-xl hover:text-amber-500 transition-colors"
+                        className="p-3 bg-slate-100 text-slate-400 rounded-xl hover:text-amber-500 transition-colors"
                       >
                         <Edit2 size={18}/>
                       </button>
@@ -646,48 +735,42 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Tab Tamu */}
+      {/* TAB TAMU */}
       {activeTab === 'guests' && (
-        <div className="max-w-6xl mx-auto space-y-8 animate-slide-up pb-32">
+        <div className="space-y-6 animate-slide-up pb-20">
           <div className="flex justify-between items-center">
-            <div>
-              <h3 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">Log Buku Tamu</h3>
-              <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Monitoring Kunjungan Luar</p>
-            </div>
+            <h3 className="text-2xl font-black text-slate-900">Log Buku Tamu</h3>
             <button 
               onClick={() => setIsModalOpen('GUEST')}
-              className="bg-blue-600 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 shadow-lg active:scale-95 transition-transform"
+              className="bg-blue-600 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase flex items-center gap-2 active:scale-95 transition-transform"
             >
               <UserPlus size={18}/> REGISTRASI
             </button>
           </div>
 
-          <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[600px]">
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden overflow-x-auto">
+            <table className="w-full text-left min-w-[600px]">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
-                  <th className="px-8 py-5 text-[10px] font-black uppercase text-slate-400 tracking-widest">Tamu</th>
-                  <th className="px-8 py-5 text-[10px] font-black uppercase text-slate-400 tracking-widest">Tujuan / Keperluan</th>
-                  <th className="px-8 py-5 text-[10px] font-black uppercase text-slate-400 tracking-widest">Status</th>
-                  <th className="px-8 py-5 text-[10px] font-black uppercase text-slate-400 tracking-widest">Waktu</th>
+                  <th className="px-8 py-4 text-[10px] font-black uppercase text-slate-400">Tamu</th>
+                  <th className="px-8 py-4 text-[10px] font-black uppercase text-slate-400">Tujuan</th>
+                  <th className="px-8 py-4 text-[10px] font-black uppercase text-slate-400">Status</th>
+                  <th className="px-8 py-4 text-[10px] font-black uppercase text-slate-400">Waktu</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {guests.length > 0 ? guests.map(g => (
-                  <tr key={g.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-8 py-5">
+                  <tr key={g.id} className="hover:bg-slate-50/30">
+                    <td className="px-8 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center font-black text-sm">{g.name.charAt(0)}</div>
+                        <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center font-black text-xs">{g.name.charAt(0)}</div>
                         <span className="font-bold text-slate-900 text-sm">{g.name}</span>
                       </div>
                     </td>
-                    <td className="px-8 py-5">
-                      <p className="text-xs font-bold text-slate-700">{g.visitToName}</p>
-                      <p className="text-[10px] text-slate-400 italic">"{g.purpose}"</p>
-                    </td>
-                    <td className="px-8 py-5">
+                    <td className="px-8 py-4 text-xs font-bold text-slate-600">{g.visitToName}</td>
+                    <td className="px-8 py-4">
                       <div className="flex items-center gap-4">
-                        <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${g.status === 'IN' ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-400'}`}>
+                        <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase ${g.status === 'IN' ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-400'}`}>
                           {g.status === 'IN' ? 'DI DALAM' : 'OUT'}
                         </span>
                         {g.status === 'IN' && (
@@ -700,14 +783,12 @@ const App: React.FC = () => {
                         )}
                       </div>
                     </td>
-                    <td className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase">
+                    <td className="px-8 py-4 text-[9px] font-black text-slate-400 uppercase">
                       {new Date(g.entryTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                     </td>
                   </tr>
                 )) : (
-                  <tr>
-                    <td colSpan={4} className="px-8 py-16 text-center text-slate-300 italic">Belum ada data kunjungan hari ini.</td>
-                  </tr>
+                  <tr><td colSpan={4} className="px-8 py-12 text-center text-slate-300 italic text-sm">Belum ada kunjungan tamu hari ini.</td></tr>
                 )}
               </tbody>
             </table>
@@ -715,97 +796,145 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Tab Patroli */}
-      {activeTab === 'patrol' && (
-        <div className="max-w-6xl mx-auto space-y-8 animate-slide-up pb-32">
-          <div className="flex justify-between items-center">
-            <h3 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">Status Patroli</h3>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-            {checkpoints.map((cp, idx) => (
-              <div key={idx} className="bg-white p-5 md:p-6 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between group transition-all">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center font-black text-base">{idx + 1}</div>
-                  <h4 className="font-black text-slate-900 text-sm md:text-base">{cp}</h4>
+      {/* CHAT */}
+      {activeTab === 'chat' && (
+        <div className="max-w-4xl mx-auto h-[calc(100vh-250px)] md:h-[calc(100vh-220px)] flex flex-col animate-slide-up pb-10">
+           <div className="flex-1 bg-white rounded-t-[2.5rem] shadow-sm border border-slate-100 overflow-y-auto p-6 md:p-10 space-y-6 no-scrollbar shadow-inner">
+              {chatMessages.length > 0 ? chatMessages.map((msg) => (
+                <div key={msg.id} className={`flex ${msg.senderId === currentUser?.id ? 'justify-end' : 'justify-start'}`}>
+                   <div className={`max-w-[80%] p-5 rounded-[1.8rem] ${msg.senderId === currentUser?.id ? 'bg-slate-900 text-white rounded-tr-none' : 'bg-slate-50 text-slate-900 rounded-tl-none border border-slate-100'}`}>
+                      <div className="flex justify-between items-center gap-4 mb-2">
+                        <span className="text-[9px] font-black uppercase tracking-widest opacity-60">{msg.senderName}</span>
+                        <span className="text-[8px] font-bold px-2 py-0.5 bg-white/10 rounded-full">{msg.senderRole}</span>
+                      </div>
+                      <p className="text-xs md:text-sm font-medium leading-relaxed">{msg.text}</p>
+                      <p className="text-[8px] mt-2 opacity-40 text-right">{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <button onClick={() => setPatrolActionState({ checkpoint: cp, status: 'OK' })} className="p-3 bg-green-50 text-green-600 rounded-xl md:rounded-2xl hover:bg-green-100"><CheckCircle size={20}/></button>
-                  <button onClick={() => setPatrolActionState({ checkpoint: cp, status: 'WARNING' })} className="p-3 bg-amber-50 text-amber-600 rounded-xl md:rounded-2xl hover:bg-amber-100"><AlertTriangle size={20}/></button>
+              )) : <div className="h-full flex items-center justify-center text-slate-300 italic font-bold">Kirim pesan koordinasi...</div>}
+              <div ref={chatEndRef} />
+           </div>
+           <form onSubmit={handleSendChat} className="bg-white p-4 md:p-6 rounded-b-[2.5rem] border-t border-slate-100 flex gap-3 flex-shrink-0 mb-16 md:mb-0">
+              <input type="text" placeholder="Ketik pesan..." className="flex-1 px-6 py-4 rounded-2xl bg-slate-50 border-2 border-slate-100 focus:border-amber-500 outline-none font-bold text-sm" value={chatInput} onChange={e => setChatInput(e.target.value)} />
+              <button type="submit" className="bg-slate-900 text-white p-4 rounded-2xl active:scale-95 transition-all"><Send size={22}/></button>
+           </form>
+        </div>
+      )}
+
+      {/* SETTINGS TAB */}
+      {activeTab === 'settings' && (
+        <div className="max-w-4xl mx-auto space-y-6 animate-slide-up pb-20">
+          <div className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+            <h3 className="text-2xl font-black text-slate-900 mb-10 flex items-center gap-3">
+              <Settings size={28} className="text-slate-400"/> Pengaturan Akun
+            </h3>
+            
+            <div className="space-y-12">
+              <div className="flex items-center gap-8 p-6 bg-slate-50 rounded-3xl border border-slate-100">
+                <div className="w-20 h-20 rounded-2xl bg-slate-900 text-white flex items-center justify-center text-3xl font-black shadow-xl">
+                  {currentUser.name.charAt(0)}
+                </div>
+                <div className="flex-1 space-y-1">
+                  <h4 className="text-xl font-black text-slate-900">{currentUser.name}</h4>
+                  <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest">{currentUser.role} Kawasan TKA</p>
+                  <p className="text-[9px] text-slate-400 font-bold uppercase">ID Sistem: {currentUser.id}</p>
                 </div>
               </div>
-            ))}
+
+              {currentUser.role === 'SECURITY' && (
+                <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 flex items-center justify-between">
+                  <div>
+                    <h5 className="font-black text-slate-900 uppercase text-xs tracking-widest mb-1 flex items-center gap-2">
+                      <Navigation size={16} className="text-blue-500"/> Bagikan Lokasi GPS
+                    </h5>
+                    <p className="text-[10px] text-slate-400 font-bold leading-relaxed max-w-md uppercase tracking-wider">Berbagi lokasi real-time dengan Admin untuk koordinasi tugas.</p>
+                  </div>
+                  <button 
+                    onClick={() => setIsGpsEnabled(!isGpsEnabled)}
+                    className={`relative w-12 h-6 rounded-full transition-all duration-300 p-1 flex items-center ${isGpsEnabled ? 'bg-green-500' : 'bg-slate-300'}`}
+                  >
+                    <div className={`w-4 h-4 bg-white rounded-full shadow-md transition-transform transform ${isGpsEnabled ? 'translate-x-6' : 'translate-x-0'}`}></div>
+                  </button>
+                </div>
+              )}
+
+              <div className="pt-10 border-t border-slate-100">
+                <button 
+                  onClick={handleLogout}
+                  className="w-full py-4 bg-red-50 text-red-600 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-3 active:scale-95 transition-all shadow-sm"
+                >
+                  <LogOut size={18}/> Keluar Aplikasi
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Tab Insiden */}
-      {activeTab === 'incident' && (
-        <div className="max-w-6xl mx-auto space-y-8 animate-slide-up pb-32">
-          <div className="flex justify-between items-center">
-            <h3 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">Daftar Insiden</h3>
-            <button onClick={() => setIsModalOpen('INCIDENT')} className="bg-red-600 text-white px-6 py-3 rounded-xl md:rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest flex items-center gap-2 active:scale-95 transition-transform"><AlertTriangle size={18}/> LAPOR</button>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
-            {incidents.map(inc => (
-              <div key={inc.id} className="bg-white p-8 rounded-[2rem] md:rounded-[3rem] shadow-sm border border-slate-100 flex flex-col justify-between relative hover:shadow-lg transition-all">
-                {currentUser?.role === 'ADMIN' && (
-                  <button onClick={() => setIncidents(prev => prev.filter(i => i.id !== inc.id))} className="absolute top-6 right-8 p-2 text-slate-300 hover:text-red-500"><Trash2 size={18}/></button>
-                )}
-                <div>
-                   <div className="flex justify-between items-start mb-6">
-                      <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest shadow-sm ${inc.severity === 'HIGH' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>{inc.severity}</span>
-                      <span className="text-[9px] text-slate-400 font-bold uppercase">{new Date(inc.timestamp).toLocaleDateString()}</span>
-                   </div>
-                   <h4 className="text-xl font-black text-slate-900 mb-2">{inc.type}</h4>
-                   <p className="text-slate-500 text-xs md:text-sm leading-relaxed mb-6 italic">"{inc.description}"</p>
-                </div>
-                <div className="flex items-center justify-between pt-6 border-t border-slate-50">
-                   <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-black text-[10px]">{inc.reporterName.charAt(0)}</div>
-                      <span className="text-[10px] font-black text-slate-900">{inc.reporterName}</span>
-                   </div>
-                   <span className={`text-[10px] font-black uppercase tracking-widest ${inc.status === 'RESOLVED' ? 'text-green-500' : 'text-amber-500'}`}>{inc.status}</span>
-                </div>
+      {/* MODALS */}
+
+      {/* Modal Checkpoint Manager (Admin Only) */}
+      {isModalOpen === 'CHECKPOINT_MGR' && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-slide-up">
+            <div className="p-8 bg-slate-900 text-white flex justify-between items-center">
+              <h3 className="text-xl font-black">{checkpointForm.oldName ? 'Edit Pos' : 'Tambah Pos Patroli'}</h3>
+              <button onClick={() => setIsModalOpen(null)}><X size={24}/></button>
+            </div>
+            <form onSubmit={handleSaveCheckpoint} className="p-8 space-y-5">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Nama Pos / Lokasi</label>
+                <input 
+                  type="text" 
+                  required 
+                  autoFocus
+                  placeholder="Contoh: Pos Gerbang Utara..." 
+                  className="w-full px-5 py-3.5 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" 
+                  value={checkpointForm.name} 
+                  onChange={e => setCheckpointForm({...checkpointForm, name: e.target.value})} 
+                />
               </div>
-            ))}
+              <div className="flex gap-4 pt-4">
+                <button type="button" onClick={() => setIsModalOpen(null)} className="flex-1 font-black text-slate-400 uppercase text-[10px] tracking-widest">Batal</button>
+                <button type="submit" className="flex-[2] py-4 bg-slate-900 text-white rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg">SIMPAN POS</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* MODALS RENDERER */}
-      
       {/* Modal Warga */}
       {isModalOpen === 'RESIDENT' && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in">
-          <div className="bg-white w-full max-w-lg rounded-[2.5rem] md:rounded-[3rem] shadow-2xl overflow-hidden animate-slide-up">
-            <div className="p-8 md:p-10 bg-[#0F172A] text-white flex justify-between items-center">
-              <h3 className="text-xl md:text-2xl font-black">{editingItem ? 'Edit Warga' : 'Warga Baru'}</h3>
-              <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-slide-up">
+            <div className="p-8 bg-[#0F172A] text-white flex justify-between items-center">
+              <h3 className="text-xl font-black">{editingItem ? 'Edit Data Warga' : 'Warga Baru'}</h3>
+              <button onClick={() => setIsModalOpen(null)}><X size={24}/></button>
             </div>
-            <form onSubmit={handleSaveResident} className="p-8 md:p-10 space-y-6">
+            <form onSubmit={handleSaveResident} className="p-8 space-y-5">
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Nama Warga</label>
-                <input type="text" required placeholder="Nama Lengkap..." className="w-full px-6 py-4 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={residentForm.name} onChange={e => setResidentForm({...residentForm, name: e.target.value})} />
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Nama Lengkap</label>
+                <input type="text" required placeholder="Nama..." className="w-full px-5 py-3.5 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={residentForm.name} onChange={e => setResidentForm({...residentForm, name: e.target.value})} />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Blok</label>
-                  <select required className="w-full px-6 py-4 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={residentForm.block} onChange={e => setResidentForm({...residentForm, block: e.target.value})}>
+                  <select required className="w-full px-5 py-3.5 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={residentForm.block} onChange={e => setResidentForm({...residentForm, block: e.target.value})}>
                     {BLOCKS.map(b => <option key={b} value={b}>{b}</option>)}
                   </select>
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">No. Rumah</label>
-                  <input type="text" required placeholder="00" className="w-full px-6 py-4 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={residentForm.houseNumber} onChange={e => setResidentForm({...residentForm, houseNumber: e.target.value})} />
+                  <input type="text" required placeholder="00" className="w-full px-5 py-3.5 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={residentForm.houseNumber} onChange={e => setResidentForm({...residentForm, houseNumber: e.target.value})} />
                 </div>
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">No. Telp</label>
-                <input type="tel" required placeholder="08..." className="w-full px-6 py-4 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={residentForm.phoneNumber} onChange={e => setResidentForm({...residentForm, phoneNumber: e.target.value})} />
+                <input type="tel" required placeholder="08..." className="w-full px-5 py-3.5 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={residentForm.phoneNumber} onChange={e => setResidentForm({...residentForm, phoneNumber: e.target.value})} />
               </div>
               <div className="flex gap-4 pt-4">
                 <button type="button" onClick={() => setIsModalOpen(null)} className="flex-1 font-black text-slate-400 uppercase text-[10px] tracking-widest">Batal</button>
-                <button type="submit" className="flex-[2] py-4 bg-slate-900 text-white rounded-xl font-black uppercase text-[10px] tracking-widest shadow-xl">SIMPAN DATA</button>
+                <button type="submit" className="flex-[2] py-4 bg-slate-900 text-white rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg">SIMPAN DATA</button>
               </div>
             </form>
           </div>
@@ -814,90 +943,68 @@ const App: React.FC = () => {
 
       {/* Modal Tamu */}
       {isModalOpen === 'GUEST' && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-slide-up">
-            <div className="p-8 md:p-10 bg-blue-600 text-white flex justify-between items-center">
-              <h3 className="text-xl md:text-2xl font-black">Registrasi Tamu</h3>
-              <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
+            <div className="p-8 bg-blue-600 text-white flex justify-between items-center">
+              <h3 className="text-xl font-black">Registrasi Tamu</h3>
+              <button onClick={() => setIsModalOpen(null)}><X size={24}/></button>
             </div>
-            <form onSubmit={handleSaveGuest} className="p-8 md:p-10 space-y-5">
+            <form onSubmit={handleSaveGuest} className="p-8 space-y-4">
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Nama Tamu</label>
-                <input type="text" required placeholder="Nama Lengkap..." className="w-full px-6 py-4 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={guestForm.name} onChange={e => setGuestForm({...guestForm, name: e.target.value})} />
+                <input type="text" required placeholder="Nama Lengkap..." className="w-full px-5 py-3.5 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={guestForm.name} onChange={e => setGuestForm({...guestForm, name: e.target.value})} />
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Tujuan (Warga)</label>
-                <select required className="w-full px-6 py-4 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={guestForm.visitToId} onChange={e => setGuestForm({...guestForm, visitToId: e.target.value})}>
+                <select required className="w-full px-5 py-3.5 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={guestForm.visitToId} onChange={e => setGuestForm({...guestForm, visitToId: e.target.value})}>
                    <option value="">-- Pilih Warga --</option>
                    {residents.map(r => <option key={r.id} value={r.id}>Blok {r.block} No. {r.houseNumber} - {r.name}</option>)}
                 </select>
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Keperluan</label>
-                <textarea required placeholder="Keperluan kunjungan..." className="w-full px-6 py-4 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold min-h-[100px] text-sm" value={guestForm.purpose} onChange={e => setGuestForm({...guestForm, purpose: e.target.value})} />
+                <textarea required placeholder="Keperluan kunjungan..." className="w-full px-5 py-3.5 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold min-h-[80px] text-sm" value={guestForm.purpose} onChange={e => setGuestForm({...guestForm, purpose: e.target.value})} />
               </div>
               <div className="flex gap-4 pt-4">
                 <button type="button" onClick={() => setIsModalOpen(null)} className="flex-1 font-black text-slate-400 uppercase text-[10px] tracking-widest">Batal</button>
-                <button type="submit" className="flex-[2] py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-[10px] tracking-widest shadow-xl">DAFTAR MASUK</button>
+                <button type="submit" className="flex-[2] py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg">DAFTAR MASUK</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* Patrol Action Modal */}
-      {patrolActionState && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in">
-          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-slide-up">
-            <div className={`p-8 md:p-10 text-white flex justify-between items-center ${patrolActionState.status === 'OK' ? 'bg-green-600' : 'bg-amber-600'}`}>
-              <h3 className="text-xl md:text-2xl font-black">{patrolActionState.checkpoint}</h3>
-              <button onClick={() => setPatrolActionState(null)} className="p-2 hover:bg-white/10 rounded-lg"><X size={28}/></button>
-            </div>
-            <div className="p-8 md:p-10 space-y-6">
-              <textarea placeholder="Tambahkan catatan (opsional)..." className="w-full px-6 py-4 rounded-[1.5rem] bg-slate-50 border-2 border-slate-100 outline-none font-bold min-h-[100px] text-sm" value={patrolActionNote} onChange={e => setPatrolActionNote(e.target.value)} />
-              <label className="flex flex-col items-center justify-center p-6 border-3 border-dashed border-slate-100 rounded-[1.5rem] cursor-pointer hover:bg-slate-50 transition-all h-[150px] relative overflow-hidden">
-                {patrolActionPhoto ? <img src={patrolActionPhoto} className="w-full h-full object-cover rounded-xl" /> : <div className="text-center"><Camera className="text-slate-200 mx-auto" size={48}/><span className="text-[9px] font-black text-slate-300 uppercase mt-2 block tracking-widest">Lampirkan Foto</span></div>}
-                <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if(f){ const r = new FileReader(); r.onloadend = () => setPatrolActionPhoto(r.result as string); r.readAsDataURL(f); } }}/>
-              </label>
-              <div className="flex gap-4 pt-4">
-                <button onClick={() => setPatrolActionState(null)} className="flex-1 font-black text-slate-400 uppercase text-[10px] tracking-widest">Batal</button>
-                <button onClick={handleSavePatrol} className={`flex-[2] py-4 text-white font-black rounded-[1.5rem] shadow-xl uppercase tracking-widest text-xs transition-all active:scale-95 ${patrolActionState.status === 'OK' ? 'bg-green-600' : 'bg-amber-600'}`}>KIRIM UPDATE</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* INCIDENT MODAL */}
+      {/* MODAL INSIDEN */}
       {isModalOpen === 'INCIDENT' && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-slide-up">
-            <div className="p-8 md:p-10 bg-red-600 text-white flex justify-between items-center">
-              <h3 className="text-xl md:text-2xl font-black">Lapor Insiden</h3>
-              <button onClick={() => setIsModalOpen(null)} className="p-2 hover:bg-red-700 rounded-lg"><X size={28}/></button>
+            <div className="p-8 bg-red-600 text-white flex justify-between items-center">
+              <h3 className="text-xl font-black">Lapor Kejadian</h3>
+              <button onClick={() => setIsModalOpen(null)}><X size={24}/></button>
             </div>
-            <form onSubmit={handleIncidentSubmit} className="p-8 md:p-10 space-y-6">
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Tipe</label>
-                <select required className="w-full px-6 py-4 rounded-[1.5rem] bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={incidentForm.type} onChange={e => setIncidentForm({...incidentForm, type: e.target.value})}>
-                  <option value="Kriminalitas">Kriminalitas</option>
-                  <option value="Gangguan">Gangguan Keamanan</option>
-                  <option value="Kebakaran">Kebakaran</option>
-                  <option value="Fasilitas">Fasilitas Rusak</option>
+            <form onSubmit={handleIncidentSubmit} className="p-8 space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Jenis Insiden</label>
+                <select required className="w-full px-5 py-3.5 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={incidentForm.type} onChange={e => setIncidentForm({...incidentForm, type: e.target.value})}>
+                  <option value="Kriminalitas">Kriminalitas / Pencurian</option>
+                  <option value="Kebakaran">Kebakaran / Asap</option>
+                  <option value="Kerusakan">Fasilitas Umum Rusak</option>
+                  <option value="Kecurigaan">Orang / Aktivitas Mencurigakan</option>
+                  <option value="Lainnya">Lainnya</option>
                 </select>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Lokasi</label>
-                <input type="text" required placeholder="Blok / No. Rumah..." className="w-full px-6 py-4 rounded-[1.5rem] bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={incidentForm.location} onChange={e => setIncidentForm({...incidentForm, location: e.target.value})} />
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Lokasi Detail</label>
+                <input type="text" required placeholder="Contoh: Depan Taman Blok A..." className="w-full px-5 py-3.5 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={incidentForm.location} onChange={e => setIncidentForm({...incidentForm, location: e.target.value})} />
               </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Kronologi</label>
-                <textarea required placeholder="Jelaskan kejadian secara singkat..." className="w-full px-6 py-4 rounded-[1.5rem] bg-slate-50 border-2 border-slate-100 outline-none font-bold min-h-[100px] text-sm" value={incidentForm.description} onChange={e => setIncidentForm({...incidentForm, description: e.target.value})} />
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Deskripsi Kejadian</label>
+                <textarea required placeholder="Jelaskan kronologi singkat..." className="w-full px-5 py-3.5 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold min-h-[100px] text-sm" value={incidentForm.description} onChange={e => setIncidentForm({...incidentForm, description: e.target.value})} />
               </div>
               <div className="flex gap-4 pt-4">
                 <button type="button" onClick={() => setIsModalOpen(null)} className="flex-1 font-black text-slate-400 uppercase text-[10px] tracking-widest">Batal</button>
-                <button type="submit" disabled={isAnalyzing} className="flex-[2] py-4 bg-red-600 text-white rounded-[1.5rem] font-black uppercase text-[10px] tracking-widest shadow-xl flex items-center justify-center gap-2">
-                  {isAnalyzing ? <Clock className="animate-spin" size={16}/> : <Send size={16}/>} KIRIM LAPORAN
+                <button type="submit" disabled={isAnalyzing} className="flex-[2] py-4 bg-red-600 text-white rounded-xl font-black uppercase text-[10px] tracking-widest shadow-xl flex items-center justify-center gap-2">
+                  {isAnalyzing ? <Clock size={16} className="animate-spin"/> : <Send size={16}/>} KIRIM LAPORAN
                 </button>
               </div>
             </form>
@@ -905,12 +1012,47 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Global Image Preview */}
+      {/* PATROL ACTION MODAL */}
+      {patrolActionState && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-slide-up">
+            <div className={`p-8 text-white flex justify-between items-center ${patrolActionState.status === 'OK' ? 'bg-green-600' : 'bg-red-600'}`}>
+              <div>
+                <h3 className="text-xl font-black">{patrolActionState.checkpoint}</h3>
+                <p className="text-[10px] font-bold uppercase opacity-80 tracking-widest">Status: {patrolActionState.status}</p>
+              </div>
+              <button onClick={() => setPatrolActionState(null)}><X size={24}/></button>
+            </div>
+            <div className="p-8 space-y-6">
+              <textarea placeholder="Tambah catatan patroli (opsional)..." className="w-full px-5 py-3.5 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none font-bold min-h-[100px] text-sm" value={patrolActionNote} onChange={e => setPatrolActionNote(e.target.value)} />
+              <div className="flex gap-4 pt-4">
+                <button onClick={() => setPatrolActionState(null)} className="flex-1 font-black text-slate-400 uppercase text-[10px] tracking-widest">Batal</button>
+                <button onClick={handleSavePatrol} className={`flex-[2] py-4 text-white rounded-xl font-black uppercase text-[10px] tracking-widest shadow-xl ${patrolActionState.status === 'OK' ? 'bg-green-600' : 'bg-red-600'}`}>SIMPAN STATUS</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SOS MODAL */}
+      {isModalOpen === 'SOS_MODAL' && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-red-600 animate-pulse">
+           <div className="text-center text-white px-10">
+              <div className="bg-white text-red-600 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-8 shadow-2xl">
+                 <BellRing size={48} />
+              </div>
+              <h1 className="text-4xl font-black mb-4 uppercase tracking-tighter">DARURAT SOS!</h1>
+              <p className="text-lg font-bold opacity-90">Sinyal bantuan telah disiarkan.<br/>Petugas keamanan terdekat segera meluncur.</p>
+           </div>
+        </div>
+      )}
+
+      {/* Global Preview Image */}
       {previewImage && (
-        <div className="fixed inset-0 z-[200] bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-6 animate-in fade-in" onClick={() => setPreviewImage(null)}>
+        <div className="fixed inset-0 z-[200] bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-6" onClick={() => setPreviewImage(null)}>
           <div className="relative max-w-4xl w-full">
-            <img src={previewImage} className="w-full h-auto max-h-[85vh] object-contain rounded-[2rem] shadow-2xl border-4 border-white/10" />
-            <button className="absolute -top-14 right-0 p-4 bg-white/10 text-white rounded-full hover:bg-white/20 transition-all backdrop-blur-md"><X size={24}/></button>
+            <img src={previewImage} className="w-full h-auto max-h-[85vh] object-contain rounded-3xl" />
+            <button className="absolute -top-12 right-0 p-3 text-white"><X size={28}/></button>
           </div>
         </div>
       )}
