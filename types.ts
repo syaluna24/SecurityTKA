@@ -60,14 +60,6 @@ export interface GuestLog {
   photo?: string;
 }
 
-export interface AuditLog {
-  id: string;
-  adminId: string;
-  adminName: string;
-  action: string;
-  timestamp: string;
-}
-
 export interface ChatMessage {
   id: string;
   senderId: string;
@@ -82,5 +74,15 @@ export interface SecurityLocation {
   userName: string;
   latitude: number;
   longitude: number;
+  lastUpdated: string;
+}
+
+export interface FullDatabase {
+  residents: Resident[];
+  guests: GuestLog[];
+  incidents: IncidentReport[];
+  patrolLogs: PatrolLog[];
+  chatMessages: ChatMessage[];
+  checkpoints: string[];
   lastUpdated: string;
 }

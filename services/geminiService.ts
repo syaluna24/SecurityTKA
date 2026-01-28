@@ -22,7 +22,9 @@ export const analyzeIncident = async (description: string) => {
       }
     });
 
-    return JSON.parse(response.text || '{}');
+    // Fix: Access response.text property directly and trim whitespace
+    const text = response.text?.trim() || '{}';
+    return JSON.parse(text);
   } catch (error) {
     console.error("Gemini Analysis Error:", error);
     return null;
@@ -37,7 +39,8 @@ export const getSecurityBriefing = async (shift: string) => {
       model: 'gemini-3-flash-preview',
       contents: `Berikan 3 poin briefing singkat dan profesional untuk satpam perumahan yang bertugas shift ${shift}. Fokus pada kewaspadaan dan pelayanan warga.`,
     });
-    return response.text;
+    // Fix: Access response.text property directly
+    return response.text?.trim() || "Tetap waspada dan layani warga dengan ramah.";
   } catch (error) {
     return "Tetap waspada dan layani warga dengan ramah.";
   }
@@ -62,7 +65,8 @@ export const generateWeeklySummary = async (data: {
       
       Gunakan nada yang menenangkan namun tetap waspada. Berikan saran strategis untuk minggu depan.`,
     });
-    return response.text;
+    // Fix: Access response.text property directly
+    return response.text?.trim() || "Laporan mingguan menunjukkan aktivitas keamanan berjalan normal.";
   } catch (error) {
     return "Laporan mingguan menunjukkan aktivitas keamanan berjalan normal dengan pengawasan rutin di seluruh area perumahan.";
   }

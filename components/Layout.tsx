@@ -146,8 +146,9 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab
                   activeTab === item.id ? 'text-amber-600 scale-105' : 'text-slate-400'
                 }`}
               >
+                {/* Fix: Added explicit casting to any for React.cloneElement to allow 'size' property override on Lucide icon components */}
                 <div className={`p-2 rounded-xl transition-all ${activeTab === item.id ? 'bg-amber-50' : ''}`}>
-                  {React.cloneElement(item.icon as React.ReactElement, { size: 20 })}
+                  {React.cloneElement(item.icon as React.ReactElement<any>, { size: 20 })}
                 </div>
                 <span className="text-[9px] font-bold uppercase mt-1 tracking-tighter">
                   {item.label}
