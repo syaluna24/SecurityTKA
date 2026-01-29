@@ -23,6 +23,12 @@
       to { transform: translateY(0); opacity: 1; }
     }
     .animate-slide-up { animation: slideUp 0.5s ease-out forwards; }
+    
+    .glass-effect {
+      background: rgba(255, 255, 255, 0.7);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
   </style>
 <script type="importmap">
 {
@@ -34,6 +40,7 @@
     "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
     "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
     "recharts": "https://esm.sh/recharts@^3.7.0",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.45.0",
     "vite": "https://esm.sh/vite@^7.3.1"
   }
 }
