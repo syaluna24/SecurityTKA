@@ -151,6 +151,31 @@ const App: React.FC = () => {
     setChatInput('');
   };
 
+  const toggleResidentPresence = async (id: string) => {
+    const res = residents.find(r => r.id === id);
+    if (!res) return;
+    const updatedStatus = !res.isHome;
+    setResidents(prev => prev.map(r => r.id === id ? { ...r, isHome: updatedStatus } : r));
+    try {
+      await supabase.from('residents').update({ isHome: updatedStatus }).eq('id', id);
+    } catch (e) {}
+  };
+
+  const handleCRUD = async (table: string, action: 'CREATE' | 'UPDATE' | 'DELETE', data?: any, id?: string) => {
+    if (action === 'DELETE') {
+      if (!window.confirm("Hapus data secara permanen?")) return;
+      if (table === 'staff') setStaff(prev => prev.filter(s => s.id !== id));
+      if (table === 'checkpoints') setCheckpoints(prev => prev.filter(c => c !== id));
+      if (table === 'residents') setResidents(prev => prev.filter(r => r.id !== id));
+    }
+    if (action === 'CREATE') {
+      if (table === 'staff') setStaff(prev => [data, ...prev]);
+      if (table === 'checkpoints') setCheckpoints(prev => [...prev, data]);
+      if (table === 'residents') setResidents(prev => [data, ...prev]);
+    }
+    setIsModalOpen(null);
+  };
+
   const submitGuest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !guestForm.name || !guestForm.visitToId) return;
@@ -186,31 +211,6 @@ const App: React.FC = () => {
     setIncidents(prev => [report, ...prev]);
     setIsModalOpen(null);
     setIncForm({ type: 'Pencurian', location: '', description: '', severity: 'MEDIUM' });
-  };
-
-  const toggleResidentPresence = async (id: string) => {
-    const res = residents.find(r => r.id === id);
-    if (!res) return;
-    const updatedStatus = !res.isHome;
-    setResidents(prev => prev.map(r => r.id === id ? { ...r, isHome: updatedStatus } : r));
-    try {
-      await supabase.from('residents').update({ isHome: updatedStatus }).eq('id', id);
-    } catch (e) {}
-  };
-
-  const handleCRUD = async (table: string, action: 'CREATE' | 'UPDATE' | 'DELETE', data?: any, id?: string) => {
-    if (action === 'DELETE') {
-      if (!window.confirm("Hapus data secara permanen?")) return;
-      if (table === 'staff') setStaff(prev => prev.filter(s => s.id !== id));
-      if (table === 'checkpoints') setCheckpoints(prev => prev.filter(c => c !== id));
-      if (table === 'residents') setResidents(prev => prev.filter(r => r.id !== id));
-    }
-    if (action === 'CREATE') {
-      if (table === 'staff') setStaff(prev => [data, ...prev]);
-      if (table === 'checkpoints') setCheckpoints(prev => [...prev, data]);
-      if (table === 'residents') setResidents(prev => [data, ...prev]);
-    }
-    setIsModalOpen(null);
   };
 
   const stats = useMemo(() => ({
@@ -355,7 +355,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* MENU KELUAR MASUK WARGA */}
+      {/* KELUAR MASUK WARGA */}
       {activeTab === 'log_resident' && (
         <div className="space-y-8 animate-slide-up pb-24">
            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -368,16 +368,16 @@ const App: React.FC = () => {
 
            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {residents.filter(r => r.name.toLowerCase().includes(searchQuery.toLowerCase()) || r.houseNumber.includes(searchQuery) || r.block.includes(searchQuery.toUpperCase())).map(res => (
-                <div key={res.id} className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col justify-between hover:shadow-xl transition-all group">
+                <div key={res.id} className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col justify-between hover:shadow-xl transition-all group relative overflow-hidden">
                    <div className="flex justify-between items-start mb-6">
                       <div className="w-12 h-12 bg-slate-900 text-white rounded-xl flex items-center justify-center font-black text-lg group-hover:bg-amber-500 transition-colors">{res.block}</div>
-                      <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${res.isHome ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>{res.isHome ? 'DI RUMAH' : 'SEDANG KELUAR'}</span>
+                      <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${res.isHome ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>{res.isHome ? 'ADA DI RUMAH' : 'SEDANG KELUAR'}</span>
                    </div>
                    <div className="mb-8">
                       <h4 className="font-black text-slate-900 uppercase italic truncate mb-1">{res.name}</h4>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No. Rumah: <span className="text-slate-900 font-black">{res.houseNumber}</span></p>
                    </div>
-                   <button onClick={() => toggleResidentPresence(res.id)} className={`w-full py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 active:scale-95 transition-all shadow-lg ${res.isHome ? 'bg-slate-900 text-white' : 'bg-green-500 text-white'}`}>
+                   <button onClick={() => toggleResidentPresence(res.id)} className={`w-full py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 active:scale-95 transition-all shadow-lg ${res.isHome ? 'bg-slate-900 text-white shadow-slate-900/10' : 'bg-green-500 text-white shadow-green-500/10'}`}>
                       {res.isHome ? <ArrowLeftRight size={16}/> : <CheckCircle size={16}/>}
                       {res.isHome ? 'CATAT KELUAR' : 'CATAT MASUK'}
                    </button>
@@ -456,7 +456,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* SETTINGS (SETELAN) - FULL IMPLEMENTATION */}
+      {/* SETTINGS (SETELAN) */}
       {activeTab === 'settings' && (
         <div className="max-w-5xl mx-auto space-y-10 animate-slide-up pb-24">
            {/* Section Profil */}
@@ -475,7 +475,6 @@ const App: React.FC = () => {
            {/* Manajemen (Hanya Admin) */}
            {currentUser.role === 'ADMIN' && (
              <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-                {/* Staff Control */}
                 <div className="bg-white p-10 rounded-[3.5rem] shadow-sm border border-slate-100">
                    <div className="flex justify-between items-center mb-10">
                       <h4 className="text-xl font-black text-slate-900 italic uppercase flex items-center gap-3"><UserCog size={24} className="text-amber-500"/> Manajemen Staff</h4>
@@ -495,7 +494,6 @@ const App: React.FC = () => {
                    </div>
                 </div>
 
-                {/* Patrol Checkpoints */}
                 <div className="bg-white p-10 rounded-[3.5rem] shadow-sm border border-slate-100">
                    <div className="flex justify-between items-center mb-10">
                       <h4 className="text-xl font-black text-slate-900 italic uppercase flex items-center gap-3"><MapPin size={24} className="text-amber-500"/> Titik Patroli</h4>
@@ -585,14 +583,13 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* RENDER VIEW TAMU */}
+      {/* RENDER VIEW TAMU (TAMBAHAN UNTUK KEPASTIAN) */}
       {activeTab === 'guests' && (
         <div className="space-y-8 animate-slide-up pb-24">
            <div className="flex justify-between items-center">
               <h3 className="text-2xl font-black text-slate-900 tracking-tight uppercase italic">Buku Tamu Digital</h3>
               <button onClick={() => setIsModalOpen('GUEST')} className="bg-blue-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase flex items-center gap-3 shadow-xl active:scale-95 transition-all"><UserPlus size={20}/> REGISTRASI TAMU</button>
            </div>
-           
            <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden overflow-x-auto">
               <table className="w-full text-left min-w-[850px]">
                 <thead className="bg-slate-50 border-b border-slate-100">
@@ -629,14 +626,13 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* RENDER VIEW INSIDEN */}
+      {/* RENDER VIEW INSIDEN (TAMBAHAN UNTUK KEPASTIAN) */}
       {activeTab === 'incident' && (
         <div className="space-y-8 animate-slide-up pb-24">
            <div className="flex justify-between items-center">
               <h3 className="text-2xl font-black text-slate-900 tracking-tight uppercase italic">Laporan Kejadian</h3>
               <button onClick={() => setIsModalOpen('INCIDENT')} className="bg-red-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase flex items-center gap-3 shadow-xl active:scale-95 transition-all"><Plus size={20}/> LAPOR BARU</button>
            </div>
-           
            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               {incidents.map(inc => (
                 <div key={inc.id} className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all relative overflow-hidden group">
@@ -663,7 +659,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* RENDER VIEW LAPORAN FEED */}
+      {/* RENDER VIEW LAPORAN FEED (TAMBAHAN UNTUK KEPASTIAN) */}
       {activeTab === 'reports' && (
         <div className="space-y-8 animate-slide-up pb-24">
            <div className="flex justify-between items-center">
@@ -673,7 +669,6 @@ const App: React.FC = () => {
                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Realtime Monitoring</span>
               </div>
            </div>
-           
            <div className="bg-white p-10 rounded-[3.5rem] shadow-sm border border-slate-100">
               <div className="space-y-12">
                 {liveTimeline.length > 0 ? liveTimeline.map((item: any, idx) => (
