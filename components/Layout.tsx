@@ -12,7 +12,9 @@ import {
   BookOpen,
   FileText,
   Settings,
-  ArrowLeftRight
+  ArrowLeftRight,
+  Menu,
+  X
 } from 'lucide-react';
 import { User, ShiftType } from '../types.ts';
 
@@ -46,7 +48,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab
     { id: 'dashboard', label: 'Beranda', icon: <Home size={18} />, roles: ['SECURITY', 'ADMIN', 'RESIDENT'] },
     { id: 'log_resident', label: 'Keluar Masuk', icon: <ArrowLeftRight size={18} />, roles: ['SECURITY', 'ADMIN'] },
     { id: 'patrol', label: 'Patroli', icon: <ClipboardCheck size={18} />, roles: ['SECURITY', 'ADMIN'] },
-    { id: 'reports', label: 'Laporan', icon: <FileText size={18} />, roles: ['SECURITY', 'ADMIN', 'RESIDENT'] },
+    { id: 'reports', label: 'Feed', icon: <FileText size={18} />, roles: ['SECURITY', 'ADMIN', 'RESIDENT'] },
     { id: 'incident', label: 'Insiden', icon: <AlertTriangle size={18} />, roles: ['SECURITY', 'ADMIN', 'RESIDENT'] },
     { id: 'guests', label: 'Tamu', icon: <BookOpen size={18} />, roles: ['SECURITY', 'ADMIN'] },
     { id: 'residents', label: 'Warga', icon: <MapPin size={18} />, roles: ['SECURITY', 'ADMIN'] },
@@ -57,7 +59,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab
   const filteredMenu = menuItems.filter(item => item.roles.includes(user.role));
 
   return (
-    <div className="flex h-screen bg-[#F8FAFC] overflow-hidden">
+    <div className="flex h-screen bg-[#F8FAFC] overflow-hidden flex-col lg:flex-row">
       {/* Desktop Sidebar */}
       <aside className="w-72 bg-[#0F172A] text-white flex flex-col hidden lg:flex border-r border-slate-800">
         <div className="p-8 flex items-center gap-4">
@@ -88,42 +90,40 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab
         </nav>
 
         <div className="p-6 border-t border-slate-800 space-y-4">
-          <div className="bg-slate-800/50 p-4 rounded-2xl border border-white/5">
-            <div className="flex items-center gap-2 text-amber-500 mb-1">
-              <Clock size={14} />
-              <span className="text-[10px] font-black uppercase tracking-widest">Tugas Sekarang</span>
-            </div>
-            <p className="text-[10px] font-bold text-slate-200 uppercase tracking-tighter italic">
-              {currentShift === ShiftType.MORNING ? 'SHIFT PAGI (07.00 - 19.00)' : 'SHIFT MALAM (19.00 - 07.00)'}
-            </p>
+          <div className="bg-slate-800/50 p-4 rounded-2xl border border-white/5 text-center">
+             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{currentTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second: '2-digit'})}</p>
+             <p className="text-[9px] font-bold text-amber-500 uppercase tracking-tighter">
+               {currentShift === ShiftType.MORNING ? 'SHIFT PAGI' : 'SHIFT MALAM'}
+             </p>
           </div>
-          <button onClick={onLogout} className="w-full flex items-center gap-3 px-5 py-4 text-red-400 hover:bg-red-500/10 rounded-2xl transition-all font-black text-sm uppercase tracking-widest">
-            <LogOut size={18} /> Keluar
+          <button onClick={onLogout} className="w-full flex items-center justify-center gap-3 px-5 py-4 text-red-400 hover:bg-red-500/10 rounded-2xl transition-all font-black text-xs uppercase tracking-widest">
+            <LogOut size={16} /> Keluar
           </button>
         </div>
       </aside>
 
+      {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-        <header className="bg-white/80 backdrop-blur-md border-b border-slate-100 px-8 py-5 flex items-center justify-between sticky top-0 z-40">
-          <div className="flex items-center gap-4">
-            <div className="lg:hidden bg-amber-500 p-2 rounded-xl" onClick={() => setActiveTab('dashboard')}>
-              <Shield className="text-slate-900" size={20} />
+        <header className="bg-white border-b border-slate-100 px-4 lg:px-8 py-3 lg:py-5 flex items-center justify-between sticky top-0 z-40">
+          <div className="flex items-center gap-3">
+            <div className="lg:hidden bg-slate-900 p-2 rounded-xl shadow-lg">
+              <Shield className="text-amber-500" size={20} />
             </div>
             <div>
-              <h2 className="text-lg font-black text-slate-900 uppercase italic tracking-tight">
+              <h2 className="text-base lg:text-lg font-black text-slate-900 uppercase italic tracking-tight truncate max-w-[150px] lg:max-w-none">
                 {menuItems.find(m => m.id === activeTab)?.label || 'Dashboard'}
               </h2>
             </div>
           </div>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 lg:gap-4">
             <div className="text-right hidden sm:block">
-              <p className="text-xs font-black text-slate-900 mb-0.5">{user.name}</p>
+              <p className="text-xs font-black text-slate-900 leading-none mb-1">{user.name}</p>
               <p className="text-[9px] text-slate-400 uppercase font-black tracking-tighter">{user.role}</p>
             </div>
             <button 
               onClick={() => setActiveTab('settings')}
-              className={`w-12 h-12 rounded-[1rem] border-2 flex items-center justify-center font-black transition-all ${
+              className={`w-10 h-10 lg:w-12 lg:h-12 rounded-xl border-2 flex items-center justify-center font-black transition-all ${
                 activeTab === 'settings' ? 'bg-amber-100 border-amber-500 text-amber-600' : 'bg-slate-100 border-white text-slate-700'
               }`}
             >
@@ -132,29 +132,33 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-6 md:p-10 pb-32 no-scrollbar">
+        <main className="flex-1 overflow-y-auto p-4 lg:p-10 pb-28 lg:pb-10 no-scrollbar bg-[#F8FAFC]">
           {children}
         </main>
 
-        {/* Mobile Nav */}
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-slate-100 shadow-[0_-8px_30px_rgba(0,0,0,0.08)] px-2">
-          <div className="flex items-center justify-between py-3">
-            {filteredMenu.slice(0, 5).map((item) => (
+        {/* Mobile Navigation - Scrollable & Compact */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-slate-100 shadow-[0_-10px_40px_rgba(0,0,0,0.1)] overflow-x-auto no-scrollbar">
+          <div className="flex items-center min-w-max px-4 py-2 gap-2">
+            {filteredMenu.map((item) => (
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`flex flex-col items-center justify-center flex-1 transition-all ${
-                  activeTab === item.id ? 'text-amber-600' : 'text-slate-400'
+                className={`flex flex-col items-center justify-center px-4 py-2 rounded-2xl transition-all ${
+                  activeTab === item.id ? 'bg-amber-500 text-slate-900' : 'text-slate-400'
                 }`}
               >
-                <div className={`p-2.5 rounded-2xl transition-all ${activeTab === item.id ? 'bg-amber-50' : ''}`}>
-                  {React.cloneElement(item.icon as React.ReactElement<any>, { size: 20 })}
+                <div className="mb-1">
+                  {React.cloneElement(item.icon as React.ReactElement<any>, { size: 18 })}
                 </div>
-                <span className="text-[9px] font-black uppercase mt-1 tracking-tighter">
+                <span className="text-[9px] font-black uppercase tracking-tighter whitespace-nowrap">
                   {item.label}
                 </span>
               </button>
             ))}
+            <button onClick={onLogout} className="flex flex-col items-center justify-center px-4 py-2 text-red-500">
+               <LogOut size={18} />
+               <span className="text-[9px] font-black uppercase mt-1">Keluar</span>
+            </button>
           </div>
         </nav>
       </div>
