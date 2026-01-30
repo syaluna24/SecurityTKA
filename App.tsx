@@ -20,7 +20,7 @@ import { getSecurityBriefing } from './services/geminiService.ts';
 import { BarChart, Bar, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { db } from './lib/db.ts';
 
-const DB_KEY = 'tka_secure_prisma_v1';
+const DB_KEY = 'tka_secure_prisma_v2';
 
 const App: React.FC = () => {
   // --- DATABASE STATES ---
@@ -44,11 +44,13 @@ const App: React.FC = () => {
   const [chatInput, setChatInput] = useState('');
   const [cloudStatus, setCloudStatus] = useState<'connected' | 'syncing' | 'offline'>('syncing');
   
-  const [isModalOpen, setIsModalOpen] = useState<'RESIDENT' | 'CHECKPOINT' | 'GUEST' | 'INCIDENT' | 'PATROL_REPORT' | 'STAFF' | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState<'RESIDENT' | 'GUEST' | 'INCIDENT' | 'PATROL_REPORT' | null>(null);
   const [editingItem, setEditingItem] = useState<any>(null);
   const [securityBriefing, setSecurityBriefing] = useState<string>('');
 
+  // Form States
   const [resForm, setResForm] = useState<Partial<Resident>>({ name: '', houseNumber: '', block: BLOCKS[0], phoneNumber: '', isHome: true });
+  const [guestForm, setGuestForm] = useState<Partial<GuestLog>>({ name: '', visitToId: '', purpose: '' });
   const [incForm, setIncForm] = useState<Partial<IncidentReport>>({ type: 'Pencurian', location: '', description: '', severity: 'MEDIUM' });
   const [patrolAction, setPatrolAction] = useState<{cp: string, status: 'OK' | 'WARNING' | 'DANGER'}>({ cp: '', status: 'OK' });
   const [patrolReportData, setPatrolReportData] = useState({ note: '', photo: '' });
@@ -56,33 +58,33 @@ const App: React.FC = () => {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- INITIAL FETCH & REAL-TIME SYNC ---
+  // --- FULL SYNC & INITIAL LOAD ---
   useEffect(() => {
-    const loadData = async () => {
+    const initApp = async () => {
       try {
         setCloudStatus('syncing');
-        const [res, logs, inc, chat] = await Promise.all([
+        const [res, logs, inc, gst, chat] = await Promise.all([
           db.resident.findMany(),
           db.patrol.findMany(),
           db.incident.findMany(),
+          db.guest.findMany(),
           db.chat.findMany()
         ]);
         
-        // Gabungkan data cloud dengan mock jika data cloud masih kosong (untuk user baru)
         setResidents(res.length > 0 ? res : MOCK_RESIDENTS);
         setPatrolLogs(logs);
         setIncidents(inc.length > 0 ? inc : MOCK_INCIDENTS);
+        setGuests(gst.length > 0 ? gst : MOCK_GUESTS);
         setChatMessages(chat);
         setCloudStatus('connected');
       } catch (e) {
-        console.error("Fetch Error:", e);
         setCloudStatus('offline');
       }
     };
 
-    loadData();
+    initApp();
 
-    // SINKRONISASI REAL-TIME (PRISMA-STYLE)
+    // REAL-TIME SUBSCRIPTIONS
     const resSub = db.resident.subscribe((p) => {
       if (p.eventType === 'INSERT') setResidents(prev => [p.new as Resident, ...prev]);
       if (p.eventType === 'UPDATE') setResidents(prev => prev.map(r => r.id === p.new.id ? p.new as Resident : r));
@@ -98,6 +100,11 @@ const App: React.FC = () => {
       if (p.eventType === 'INSERT') setPatrolLogs(prev => [p.new as PatrolLog, ...prev]);
     });
 
+    const guestSub = db.guest.subscribe((p) => {
+      if (p.eventType === 'INSERT') setGuests(prev => [p.new as GuestLog, ...prev]);
+      if (p.eventType === 'UPDATE') setGuests(prev => prev.map(g => g.id === p.new.id ? p.new as GuestLog : g));
+    });
+
     const chatSub = db.chat.subscribe((p) => {
       if (p.eventType === 'INSERT') setChatMessages(prev => [...prev, p.new as ChatMessage]);
     });
@@ -106,6 +113,7 @@ const App: React.FC = () => {
       resSub.unsubscribe();
       incSub.unsubscribe();
       patrolSub.unsubscribe();
+      guestSub.unsubscribe();
       chatSub.unsubscribe();
     };
   }, []);
@@ -122,7 +130,7 @@ const App: React.FC = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, activeTab]);
 
-  // --- HANDLERS ---
+  // --- ACTIONS ---
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     const isAdmin = loginTab === 'ADMIN';
@@ -137,40 +145,50 @@ const App: React.FC = () => {
 
   const submitResident = async (e: React.FormEvent) => {
     e.preventDefault();
-    const data: Partial<Resident> = { 
-      name: resForm.name, 
-      houseNumber: resForm.houseNumber, 
-      block: resForm.block, 
-      phoneNumber: resForm.phoneNumber || '', 
-      isHome: resForm.isHome ?? true 
-    };
-
+    const payload = { ...resForm, id: editingItem?.id || `r-${Date.now()}` };
     if (editingItem) {
-      await db.resident.update(editingItem.id, data);
+      await db.resident.update(editingItem.id, payload);
     } else {
-      await db.resident.create({ ...data, id: `r-${Date.now()}` });
+      await db.resident.create(payload);
     }
-    
-    setResForm({ name: '', houseNumber: '', block: BLOCKS[0], phoneNumber: '', isHome: true });
     setIsModalOpen(null);
+    setResForm({ name: '', houseNumber: '', block: BLOCKS[0], phoneNumber: '', isHome: true });
     setEditingItem(null);
+  };
+
+  const submitGuest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!guestForm.name || !guestForm.visitToId) return;
+    const resTarget = residents.find(r => r.id === guestForm.visitToId);
+    const payload = {
+      id: `g-${Date.now()}`,
+      name: guestForm.name,
+      visitToId: guestForm.visitToId,
+      visitToName: resTarget ? `${resTarget.name} (${resTarget.block}-${resTarget.houseNumber})` : 'Unit',
+      purpose: guestForm.purpose || 'Kunjungan',
+      entryTime: new Date().toISOString(),
+      status: 'IN'
+    };
+    await db.guest.create(payload);
+    setIsModalOpen(null);
+    setGuestForm({ name: '', visitToId: '', purpose: '' });
   };
 
   const submitIncident = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !incForm.description) return;
-    const log: Partial<IncidentReport> = {
-      id: `inc-${Date.now()}`, 
-      reporterId: currentUser.id, 
-      reporterName: currentUser.name, 
-      timestamp: new Date().toISOString(), 
-      type: incForm.type || 'Lainnya', 
-      description: incForm.description || '', 
+    const payload = {
+      id: `inc-${Date.now()}`,
+      reporterId: currentUser.id,
+      reporterName: currentUser.name,
+      timestamp: new Date().toISOString(),
+      type: incForm.type || 'Lainnya',
+      description: incForm.description,
       location: incForm.location || 'Area Perumahan',
-      status: 'PENDING', 
-      severity: (incForm.severity as any) || 'MEDIUM'
+      status: 'PENDING',
+      severity: incForm.severity || 'MEDIUM'
     };
-    await db.incident.create(log);
+    await db.incident.create(payload);
     setIsModalOpen(null);
     setIncForm({ type: 'Pencurian', location: '', description: '', severity: 'MEDIUM' });
   };
@@ -178,17 +196,17 @@ const App: React.FC = () => {
   const submitPatrol = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !patrolReportData.photo) return;
-    const log: Partial<PatrolLog> = {
-      id: `p-${Date.now()}`, 
-      securityId: currentUser.id, 
-      securityName: currentUser.name, 
-      timestamp: new Date().toISOString(), 
-      checkpoint: patrolAction.cp, 
-      status: patrolAction.status, 
-      note: patrolReportData.note, 
+    const payload = {
+      id: `p-${Date.now()}`,
+      securityId: currentUser.id,
+      securityName: currentUser.name,
+      timestamp: new Date().toISOString(),
+      checkpoint: patrolAction.cp,
+      status: patrolAction.status,
+      note: patrolReportData.note,
       photo: patrolReportData.photo
     };
-    await db.patrol.create(log);
+    await db.patrol.create(payload);
     setIsModalOpen(null);
     setPatrolReportData({ note: '', photo: '' });
   };
@@ -196,29 +214,16 @@ const App: React.FC = () => {
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim() || !currentUser) return;
-    const msg: Partial<ChatMessage> = {
-      id: `msg-${Date.now()}`, 
-      senderId: currentUser.id, 
-      senderName: currentUser.name, 
-      senderRole: currentUser.role, 
-      text: chatInput, 
+    const payload = {
+      id: `msg-${Date.now()}`,
+      senderId: currentUser.id,
+      senderName: currentUser.name,
+      senderRole: currentUser.role,
+      text: chatInput,
       timestamp: new Date().toISOString()
     };
-    await db.chat.create(msg);
+    await db.chat.create(payload);
     setChatInput('');
-  };
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setPatrolReportData(prev => ({ ...prev, photo: reader.result as string }));
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const toggleHomeStatus = async (res: Resident) => {
-    await db.resident.update(res.id, { isHome: !res.isHome });
   };
 
   const stats = useMemo(() => ({
@@ -257,16 +262,16 @@ const App: React.FC = () => {
                 <Shield size={32} className="text-slate-900" />
               </div>
               <h1 className="text-3xl lg:text-4xl font-black mb-4 tracking-tighter italic uppercase leading-tight">TKA SECURE <br/><span className="text-amber-500 not-italic text-2xl font-light">Prisma Cloud</span></h1>
-              <p className="text-slate-400 text-sm leading-relaxed max-w-[280px]">Manajemen keamanan terpadu dengan sinkronisasi Prisma *real-time*.</p>
+              <p className="text-slate-400 text-sm italic leading-relaxed">Keamanan cerdas untuk masa depan perumahan.</p>
             </div>
-            <div className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-center gap-3 relative z-10 mt-10">
+            <div className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-center gap-3">
                <div className={`w-2 h-2 rounded-full animate-pulse ${cloudStatus === 'connected' ? 'bg-green-500' : 'bg-amber-500'}`}></div>
-               <span className="text-[10px] font-black uppercase tracking-widest text-slate-300 italic">{cloudStatus === 'connected' ? 'Connected' : 'Syncing Data...'}</span>
+               <span className="text-[10px] font-black uppercase tracking-widest text-slate-300 italic">{cloudStatus === 'connected' ? 'Cloud Connected' : 'Syncing...'}</span>
             </div>
           </div>
 
           <div className="w-full md:w-7/12 p-8 lg:p-14 h-[650px] lg:h-[750px] flex flex-col bg-white overflow-y-auto no-scrollbar">
-            <h2 className="text-3xl font-black text-slate-900 mb-8 tracking-tight italic uppercase">Portal Akses</h2>
+            <h2 className="text-3xl font-black text-slate-900 mb-8 tracking-tight italic uppercase">Portal Login</h2>
             <div className="flex bg-slate-100 p-1.5 rounded-2xl mb-8">
               {(['SECURITY', 'ADMIN', 'RESIDENT'] as const).map(t => (
                 <button key={t} onClick={() => { setLoginTab(t); setSelectedUser(null); setLoginSearch(''); }}
@@ -278,8 +283,8 @@ const App: React.FC = () => {
 
             <div className="relative mb-6">
               <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-              <input type="text" placeholder={`Cari ${loginTab}...`}
-                className="w-full pl-14 pr-6 py-4.5 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-amber-500 outline-none font-bold text-sm shadow-inner transition-all"
+              <input type="text" placeholder={`Cari nama ${loginTab}...`}
+                className="w-full pl-14 pr-6 py-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-amber-500 outline-none font-bold text-sm shadow-inner transition-all"
                 value={loginSearch} onChange={e => setLoginSearch(e.target.value)} />
             </div>
 
@@ -290,7 +295,7 @@ const App: React.FC = () => {
                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-xl ${selectedUser?.id === u.id ? 'bg-amber-500 text-slate-900' : 'bg-slate-900 text-white'}`}>{u.name.charAt(0)}</div>
                   <div className="flex-1 text-left">
                     <p className="font-black text-slate-900 text-base truncate uppercase">{u.name}</p>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{u.sub || 'Akses Portal'}</p>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{u.sub || 'Identity Access'}</p>
                   </div>
                 </button>
               ))}
@@ -299,9 +304,8 @@ const App: React.FC = () => {
             {selectedUser && (
               <form onSubmit={handleLogin} className="pt-8 border-t border-slate-100 space-y-5">
                 <input type="password" required placeholder="PIN"
-                  className="w-full px-8 py-4.5 rounded-2xl bg-slate-50 border-2 border-slate-100 focus:border-amber-500 outline-none font-black text-2xl tracking-[0.6em] text-center" 
+                  className="w-full px-8 py-4 rounded-2xl bg-slate-50 border-2 border-slate-100 focus:border-amber-500 outline-none font-black text-2xl tracking-[0.6em] text-center" 
                   value={passwordInput} onChange={e => setPasswordInput(e.target.value)} />
-                {loginError && <p className="text-red-500 text-[10px] font-black uppercase text-center">{loginError}</p>}
                 <button type="submit" className="w-full bg-slate-900 text-white font-black py-5 rounded-2xl flex items-center justify-center gap-4 text-xs uppercase tracking-widest shadow-2xl active:scale-95 transition-all">
                   KONFIRMASI <ArrowRight size={20} />
                 </button>
@@ -321,10 +325,10 @@ const App: React.FC = () => {
         <div className="space-y-8 animate-slide-up pb-10">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
             {[
-              { label: 'Petugas Aktif', val: stats.activeGuards, icon: <UserCheck size={24}/>, color: 'blue' },
-              { label: 'Insiden Pending', val: stats.pendingIncidents, icon: <AlertTriangle size={24}/>, color: 'red' },
+              { label: 'Satpam Aktif', val: stats.activeGuards, icon: <UserCheck size={24}/>, color: 'blue' },
+              { label: 'Insiden Aktif', val: stats.pendingIncidents, icon: <AlertTriangle size={24}/>, color: 'red' },
               { label: 'Tamu Terdaftar', val: stats.guestsIn, icon: <Users size={24}/>, color: 'amber' },
-              { label: 'Unit Terdata', val: stats.totalResidents, icon: <Home size={24}/>, color: 'green' }
+              { label: 'Unit Terdaftar', val: stats.totalResidents, icon: <Home size={24}/>, color: 'green' }
             ].map((s, i) => (
               <div key={i} className="bg-white p-6 lg:p-8 rounded-[2rem] shadow-sm border border-slate-100 group hover:shadow-xl transition-all">
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-6 ${s.color === 'amber' ? 'bg-amber-50 text-amber-600' : s.color === 'red' ? 'bg-red-50 text-red-600' : s.color === 'blue' ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600'}`}>
@@ -338,7 +342,7 @@ const App: React.FC = () => {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 bg-white p-6 lg:p-10 rounded-[2.5rem] shadow-sm border border-slate-100 min-h-[400px]">
-               <h3 className="text-xl font-black text-slate-900 mb-10 flex items-center gap-4 uppercase italic leading-none"><Activity size={24} className="text-amber-500 animate-pulse"/> Grafik Aktivitas</h3>
+               <h3 className="text-xl font-black text-slate-900 mb-10 flex items-center gap-4 uppercase italic"><Activity size={24} className="text-amber-500 animate-pulse"/> Analisis Aktivitas</h3>
                <div className="h-[250px] lg:h-[300px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={chartData}>
@@ -354,7 +358,7 @@ const App: React.FC = () => {
                <div className="relative z-10">
                   <div className="flex items-center gap-4 mb-8">
                     <Radio size={32} className="text-amber-500 animate-pulse"/>
-                    <h3 className="font-black text-2xl uppercase italic leading-none">AI Briefing</h3>
+                    <h3 className="font-black text-2xl uppercase italic">Briefing Satpam</h3>
                   </div>
                   <p className="text-slate-400 text-sm italic leading-relaxed font-medium">"{securityBriefing || 'Menyambungkan asisten virtual...'}"</p>
                </div>
@@ -368,14 +372,14 @@ const App: React.FC = () => {
       {(activeTab === 'residents' || activeTab === 'log_resident') && (
         <div className="space-y-8 animate-slide-up pb-24">
            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-              <h3 className="text-2xl font-black text-slate-900 tracking-tight uppercase italic">{activeTab === 'residents' ? 'Database Penghuni' : 'Status Unit'}</h3>
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight uppercase italic">{activeTab === 'residents' ? 'Database Penghuni' : 'Status Hunian'}</h3>
               <div className="flex gap-4 items-center">
                 <div className="relative w-full lg:w-[450px]">
                   <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={20}/>
-                  <input type="text" placeholder="Cari unit atau nama..." className="w-full pl-14 pr-6 py-4.5 rounded-[1.8rem] bg-white border border-slate-100 outline-none focus:border-amber-500 font-bold text-sm shadow-sm" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+                  <input type="text" placeholder="Cari nama atau unit..." className="w-full pl-14 pr-6 py-4.5 rounded-[1.8rem] bg-white border border-slate-100 outline-none focus:border-amber-500 font-bold text-sm shadow-sm" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
                 </div>
                 {activeTab === 'residents' && currentUser.role === 'ADMIN' && (
-                  <button onClick={() => { setEditingItem(null); setResForm({ name: '', houseNumber: '', block: BLOCKS[0] }); setIsModalOpen('RESIDENT'); }} className="bg-slate-900 text-white p-4 rounded-2xl shadow-xl active:scale-95"><Plus size={24}/></button>
+                  <button onClick={() => { setEditingItem(null); setResForm({ name: '', houseNumber: '', block: BLOCKS[0] }); setIsModalOpen('RESIDENT'); }} className="bg-slate-900 text-white p-4 rounded-2xl shadow-xl active:scale-95 transition-all"><Plus size={24}/></button>
                 )}
               </div>
            </div>
@@ -384,15 +388,15 @@ const App: React.FC = () => {
               {residents.filter(r => r.name.toLowerCase().includes(searchQuery.toLowerCase()) || r.houseNumber.includes(searchQuery)).map(res => (
                 <div key={res.id} className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col justify-between hover:shadow-xl transition-all group">
                    <div className="flex justify-between items-start mb-6">
-                      <div className="w-12 h-12 bg-slate-900 text-white rounded-[1.2rem] flex items-center justify-center font-black text-sm group-hover:bg-amber-50 transition-colors">{res.block}</div>
-                      <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${res.isHome ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>{res.isHome ? 'ADA DI UNIT' : 'SEDANG KELUAR'}</span>
+                      <div className="w-12 h-12 bg-slate-900 text-white rounded-[1.2rem] flex items-center justify-center font-black text-sm group-hover:bg-amber-500 transition-colors">{res.block}</div>
+                      <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${res.isHome ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>{res.isHome ? 'DI UNIT' : 'KELUAR'}</span>
                    </div>
                    <div className="mb-8">
                       <h4 className="font-black text-slate-900 uppercase italic truncate text-base mb-1 leading-none">{res.name}</h4>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Unit: <span className="text-slate-900 font-black">{res.block}-{res.houseNumber}</span></p>
                    </div>
                    {activeTab === 'log_resident' ? (
-                     <button onClick={() => toggleHomeStatus(res)} className={`w-full py-4.5 rounded-[1.5rem] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 active:scale-95 transition-all shadow-lg ${res.isHome ? 'bg-slate-900 text-white' : 'bg-green-500 text-white'}`}>
+                     <button onClick={() => db.resident.update(res.id, { isHome: !res.isHome })} className={`w-full py-4.5 rounded-[1.5rem] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 active:scale-95 transition-all shadow-lg ${res.isHome ? 'bg-slate-900 text-white' : 'bg-green-500 text-white'}`}>
                         {res.isHome ? <ArrowLeftRight size={18}/> : <CheckCircle size={18}/>}
                         {res.isHome ? 'CATAT KELUAR' : 'KONFIRMASI MASUK'}
                      </button>
@@ -406,60 +410,11 @@ const App: React.FC = () => {
                    )}
                 </div>
               ))}
-              {residents.length === 0 && (
-                <div className="col-span-full py-24 text-center">
-                   <Ghost size={64} className="mx-auto text-slate-100 mb-4"/>
-                   <p className="font-black text-slate-300 uppercase tracking-widest italic">Data Belum Sinkron atau Kosong</p>
-                </div>
-              )}
            </div>
         </div>
       )}
 
-      {/* FEED AKTIVITAS */}
-      {activeTab === 'reports' && (
-        <div className="space-y-8 animate-slide-up pb-20">
-           <div className="flex justify-between items-center">
-              <h3 className="text-2xl font-black text-slate-900 tracking-tight uppercase italic">Cloud Feed (Real-time)</h3>
-           </div>
-           <div className="bg-white p-6 lg:p-12 rounded-[3rem] shadow-sm border border-slate-100">
-              <div className="space-y-12">
-                {liveTimeline.length > 0 ? liveTimeline.map((item: any, idx) => (
-                  <div key={idx} className="flex gap-6 lg:gap-10 group">
-                     <div className="flex flex-col items-center">
-                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg transition-transform group-hover:scale-110 ${item.feedType === 'PATROL' ? 'bg-slate-900 text-white' : item.feedType === 'INCIDENT' ? 'bg-red-600 text-white' : 'bg-blue-600 text-white'}`}>
-                           {item.feedType === 'PATROL' ? <ClipboardCheck size={26}/> : item.feedType === 'INCIDENT' ? <AlertTriangle size={26}/> : <BookOpen size={26}/>}
-                        </div>
-                        <div className="w-0.5 flex-1 bg-slate-100 mt-6 group-last:hidden"></div>
-                     </div>
-                     <div className="flex-1 pb-12 border-b border-slate-50 last:border-none">
-                        <div className="flex justify-between items-center mb-3">
-                           <h4 className="font-black text-slate-900 text-base lg:text-lg uppercase italic">{item.feedType === 'PATROL' ? `Patroli: ${item.checkpoint}` : item.feedType === 'INCIDENT' ? `Insiden: ${item.type}` : `Kunjungan Tamu`}</h4>
-                           <span className="text-[11px] font-black text-slate-300 uppercase tracking-widest">{new Date(item.sortTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                        </div>
-                        <p className="text-sm lg:text-base text-slate-500 font-medium mb-6 italic leading-relaxed">
-                          {item.feedType === 'PATROL' ? `Area dipastikan ${item.status}. ${item.note || ''}` : item.description || `Pendaftaran tamu ${item.name} menuju ${item.visitToName}.`}
-                        </p>
-                        {item.photo && <img src={item.photo} alt="Bukti" className="mb-6 rounded-[2rem] w-full max-w-md border border-slate-100 shadow-xl" />}
-                        <div className="flex flex-wrap gap-3">
-                           <span className={`px-4 lg:px-5 py-2 lg:py-2.5 rounded-full text-[9px] font-black uppercase tracking-widest ${item.status === 'OK' || item.status === 'RESOLVED' || item.status === 'IN' ? 'bg-green-50 text-green-600 shadow-sm' : 'bg-red-50 text-red-600 shadow-sm'}`}>{item.status || 'VERIFIED'}</span>
-                           <span className="px-4 lg:px-5 py-2 lg:py-2.5 bg-slate-50 text-slate-400 rounded-full text-[9px] font-black uppercase tracking-widest">Oleh: {item.securityName || item.reporterName || 'Sistem'}</span>
-                        </div>
-                     </div>
-                  </div>
-                )) : (
-                  <div className="py-24 text-center">
-                     <p className="font-black text-slate-200 uppercase tracking-[0.3em] italic">Belum Ada Riwayat Hari Ini</p>
-                  </div>
-                )}
-              </div>
-           </div>
-        </div>
-      )}
-
-      {/* TAB LAIN (INSIDEN, PATROLI, CHAT, GUEST) - MENGGUNAKAN PRISMA-LIKE API YANG SAMA */}
-      
-      {/* MODAL WINDOWS (RESIDENT, INCIDENT, PATROL_REPORT) */}
+      {/* MODAL RESIDENT */}
       {isModalOpen === 'RESIDENT' && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in">
           <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl animate-slide-up overflow-hidden">
@@ -494,42 +449,44 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* PATROL REPORT MODAL */}
-      {isModalOpen === 'PATROL_REPORT' && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl animate-slide-up overflow-hidden">
-            <div className={`p-8 lg:p-10 text-white flex justify-between items-center ${patrolAction.status === 'OK' ? 'bg-green-600' : 'bg-red-600'}`}>
-              <div>
-                <h3 className="text-xl lg:text-2xl font-black uppercase leading-none italic">{patrolAction.cp}</h3>
-                <p className="text-[10px] font-black uppercase opacity-70 mt-1 tracking-widest">Digital Field Report</p>
+      {/* FEED KEGIATAN */}
+      {activeTab === 'reports' && (
+        <div className="space-y-8 animate-slide-up pb-20">
+           <div className="flex justify-between items-center">
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight uppercase italic">Feed Aktivitas Real-Time</h3>
+           </div>
+           <div className="bg-white p-6 lg:p-12 rounded-[3rem] shadow-sm border border-slate-100">
+              <div className="space-y-12">
+                {liveTimeline.length > 0 ? liveTimeline.map((item: any, idx) => (
+                  <div key={idx} className="flex gap-6 lg:gap-10 group">
+                     <div className="flex flex-col items-center">
+                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg transition-transform group-hover:scale-110 ${item.feedType === 'PATROL' ? 'bg-slate-900 text-white' : item.feedType === 'INCIDENT' ? 'bg-red-600 text-white' : 'bg-blue-600 text-white'}`}>
+                           {item.feedType === 'PATROL' ? <ClipboardCheck size={26}/> : item.feedType === 'INCIDENT' ? <AlertTriangle size={26}/> : <BookOpen size={26}/>}
+                        </div>
+                        <div className="w-0.5 flex-1 bg-slate-100 mt-6 group-last:hidden"></div>
+                     </div>
+                     <div className="flex-1 pb-12 border-b border-slate-50 last:border-none">
+                        <div className="flex justify-between items-center mb-3">
+                           <h4 className="font-black text-slate-900 text-base lg:text-lg uppercase italic">{item.feedType === 'PATROL' ? `Patroli: ${item.checkpoint}` : item.feedType === 'INCIDENT' ? `Insiden: ${item.type}` : `Akses Tamu Terdeteksi`}</h4>
+                           <span className="text-[11px] font-black text-slate-300 uppercase tracking-widest">{new Date(item.sortTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                        </div>
+                        <p className="text-sm lg:text-base text-slate-500 font-medium mb-6 italic leading-relaxed">
+                          {item.feedType === 'PATROL' ? `Area dipastikan ${item.status}. ${item.note || ''}` : item.description || `Pendaftaran tamu ${item.name} menuju ${item.visitToName}.`}
+                        </p>
+                        {item.photo && <img src={item.photo} alt="Bukti" className="mb-6 rounded-[2rem] w-full max-w-md border border-slate-100 shadow-xl" />}
+                        <div className="flex flex-wrap gap-3">
+                           <span className={`px-4 lg:px-5 py-2 lg:py-2.5 rounded-full text-[9px] font-black uppercase tracking-widest ${item.status === 'OK' || item.status === 'RESOLVED' || item.status === 'IN' ? 'bg-green-50 text-green-600 shadow-sm' : 'bg-red-50 text-red-600 shadow-sm'}`}>{item.status || 'VERIFIED'}</span>
+                           <span className="px-4 lg:px-5 py-2 lg:py-2.5 bg-slate-50 text-slate-400 rounded-full text-[9px] font-black uppercase tracking-widest shadow-sm">Oleh: {item.securityName || item.reporterName || 'Sistem'}</span>
+                        </div>
+                     </div>
+                  </div>
+                )) : (
+                  <div className="py-24 text-center">
+                     <p className="font-black text-slate-200 uppercase tracking-[0.3em] italic">Belum Ada Riwayat Hari Ini</p>
+                  </div>
+                )}
               </div>
-              <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
-            </div>
-            <form onSubmit={submitPatrol} className="p-8 lg:p-12 space-y-6 lg:space-y-8">
-              <div className="space-y-2">
-                 <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Ambil Foto Area (Wajib):</label>
-                 <div className="flex flex-col gap-4">
-                    {patrolReportData.photo ? (
-                      <div className="relative group">
-                         <img src={patrolReportData.photo} alt="Preview" className="w-full h-48 lg:h-56 object-cover rounded-[2rem] border-2 border-slate-100 shadow-inner" />
-                         <button type="button" onClick={() => setPatrolReportData(prev => ({ ...prev, photo: '' }))} className="absolute top-4 right-4 p-3 bg-red-600 text-white rounded-2xl shadow-2xl active:scale-95 transition-all"><Trash2 size={20}/></button>
-                      </div>
-                    ) : (
-                      <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full h-48 lg:h-56 rounded-[2rem] bg-slate-50 border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-4 text-slate-400 hover:border-slate-400 transition-all group">
-                         <Camera size={48} className="group-hover:scale-110 transition-transform" />
-                         <span className="font-black text-[10px] uppercase tracking-widest">AKTIFKAN KAMERA</span>
-                      </button>
-                    )}
-                    <input type="file" ref={fileInputRef} accept="image/*" capture="environment" className="hidden" onChange={handleFileSelect} />
-                 </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Catatan Keamanan:</label>
-                <textarea required placeholder="Jelaskan kondisi detail..." className="w-full px-8 py-5 rounded-[1.5rem] bg-slate-50 border-2 border-transparent outline-none font-bold text-sm min-h-[140px] focus:border-slate-900 transition-all shadow-inner" value={patrolReportData.note} onChange={e => setPatrolReportData({...patrolReportData, note: e.target.value})} />
-              </div>
-              <button type="submit" className={`w-full py-5 text-white rounded-[2rem] font-black uppercase text-[10px] tracking-widest shadow-2xl active:scale-95 transition-all ${patrolAction.status === 'OK' ? 'bg-green-600' : 'bg-red-600'}`}>KIRIM LAPORAN CLOUD</button>
-            </form>
-          </div>
+           </div>
         </div>
       )}
 
@@ -560,6 +517,192 @@ const App: React.FC = () => {
               <input type="text" placeholder="Tulis instruksi atau laporan..." className="flex-1 px-8 py-5 rounded-[1.8rem] bg-slate-50 border-2 border-transparent outline-none font-bold text-sm lg:text-base focus:border-amber-500 transition-all shadow-inner" value={chatInput} onChange={e => setChatInput(e.target.value)} />
               <button type="submit" className="bg-slate-900 text-white p-5 rounded-2xl active:scale-95 transition-all shadow-2xl hover:bg-slate-800"><Send size={26}/></button>
            </form>
+        </div>
+      )}
+
+      {/* GUESTS */}
+      {activeTab === 'guests' && (
+        <div className="space-y-8 animate-slide-up pb-24">
+           <div className="flex justify-between items-center">
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight uppercase italic">Log Buku Tamu Digital</h3>
+              <button onClick={() => setIsModalOpen('GUEST')} className="bg-blue-600 text-white px-8 py-4 rounded-[1.5rem] font-black text-[10px] uppercase flex items-center gap-3 shadow-2xl active:scale-95 transition-all"><UserPlus size={20}/> REGISTRASI TAMU</button>
+           </div>
+           <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden overflow-x-auto no-scrollbar">
+              <table className="w-full text-left min-w-[800px]">
+                <thead className="bg-slate-50 border-b border-slate-100">
+                  <tr>
+                    <th className="px-10 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Nama Tamu</th>
+                    <th className="px-10 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Tujuan Unit</th>
+                    <th className="px-10 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Waktu Masuk</th>
+                    <th className="px-10 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                   {guests.map(g => (
+                     <tr key={g.id} className="hover:bg-slate-50/50 transition-colors">
+                       <td className="px-10 py-8">
+                          <p className="font-black text-slate-900 text-sm lg:text-base mb-1 italic uppercase leading-none">{g.name}</p>
+                          <p className="text-[11px] text-slate-400 font-medium italic">"{g.purpose}"</p>
+                       </td>
+                       <td className="px-10 py-8 text-xs font-black text-slate-500 uppercase tracking-widest">{g.visitToName}</td>
+                       <td className="px-10 py-8 text-[11px] font-black text-slate-400">{new Date(g.entryTime).toLocaleString('id-ID')}</td>
+                       <td className="px-10 py-8 text-right">
+                          <span onClick={() => db.guest.update(g.id, { status: g.status === 'IN' ? 'OUT' : 'IN' })} className={`px-5 py-2 rounded-full text-[9px] font-black uppercase tracking-widest cursor-pointer active:scale-95 transition-all ${g.status === 'IN' ? 'bg-green-100 text-green-600 shadow-sm' : 'bg-slate-100 text-slate-400'}`}>{g.status === 'IN' ? 'DI AREA' : 'KELUAR'}</span>
+                       </td>
+                     </tr>
+                   ))}
+                </tbody>
+              </table>
+           </div>
+        </div>
+      )}
+
+      {/* PATROLI */}
+      {activeTab === 'patrol' && (
+        <div className="space-y-8 animate-slide-up pb-20">
+           <div className="flex justify-between items-center">
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight uppercase italic">Kontrol Wilayah</h3>
+           </div>
+           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
+              {checkpoints.map((cp, idx) => {
+                const last = patrolLogs.filter(l => l.checkpoint === cp)[0];
+                return (
+                  <div key={idx} className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-between group hover:shadow-2xl transition-all duration-300">
+                    <div>
+                      <div className="flex justify-between items-start mb-8">
+                        <div className="w-16 h-16 rounded-[1.8rem] bg-slate-900 text-white flex items-center justify-center font-black text-2xl group-hover:bg-amber-500 group-hover:text-slate-900 transition-colors shadow-lg">{idx + 1}</div>
+                        {last && <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${last.status === 'OK' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>{last.status}</span>}
+                      </div>
+                      <h4 className="text-xl font-black text-slate-900 mb-10 tracking-tight uppercase italic leading-tight">{cp}</h4>
+                    </div>
+                    {currentUser.role === 'SECURITY' ? (
+                      <div className="grid grid-cols-2 gap-4">
+                        <button onClick={() => { setPatrolAction({cp, status: 'OK'}); setIsModalOpen('PATROL_REPORT'); }} className="py-5 bg-green-500 text-white rounded-2xl font-black text-[10px] uppercase active:scale-95 shadow-lg">AMAN</button>
+                        <button onClick={() => { setPatrolAction({cp, status: 'DANGER'}); setIsModalOpen('PATROL_REPORT'); }} className="py-5 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase active:scale-95 shadow-lg">BAHAYA</button>
+                      </div>
+                    ) : (
+                      <div className="text-[10px] font-black text-slate-400 uppercase border-t pt-6 tracking-widest italic truncate">Log: {last ? `${last.securityName} (${new Date(last.timestamp).toLocaleTimeString()})` : 'Belum Dicek'}</div>
+                    )}
+                  </div>
+                );
+              })}
+           </div>
+        </div>
+      )}
+
+      {/* INSIDEN */}
+      {activeTab === 'incident' && (
+        <div className="space-y-8 animate-slide-up pb-20">
+           <div className="flex justify-between items-center">
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight uppercase italic">Laporan Insiden</h3>
+              <button onClick={() => setIsModalOpen('INCIDENT')} className="bg-red-600 text-white px-8 py-4 rounded-[1.5rem] font-black text-[10px] uppercase flex items-center gap-3 shadow-2xl active:scale-95 transition-all"><Plus size={20}/> LAPOR BARU</button>
+           </div>
+           
+           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {incidents.map(inc => (
+                <div key={inc.id} className="bg-white p-8 lg:p-10 rounded-[3rem] border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-2xl transition-all duration-500">
+                   <div className={`absolute top-0 right-0 w-2 h-full ${inc.severity === 'HIGH' ? 'bg-red-600' : inc.severity === 'MEDIUM' ? 'bg-amber-500' : 'bg-blue-500'}`}></div>
+                   <div className="flex justify-between items-start mb-6">
+                      <div className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest ${inc.status === 'RESOLVED' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600 animate-pulse'}`}>{inc.status}</div>
+                      <span className="text-[11px] font-black text-slate-300 uppercase tracking-widest">{new Date(inc.timestamp).toLocaleDateString('id-ID')}</span>
+                   </div>
+                   <h4 className="text-xl lg:text-2xl font-black text-slate-900 mb-2 italic uppercase tracking-tight leading-none">{inc.type}</h4>
+                   <p className="text-[11px] lg:text-sm font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2 italic"><MapPin size={14}/> {inc.location}</p>
+                   <p className="text-sm lg:text-base text-slate-600 font-medium leading-relaxed italic border-l-4 border-slate-100 pl-4">"{inc.description}"</p>
+                </div>
+              ))}
+           </div>
+        </div>
+      )}
+
+      {/* MODAL GUEST */}
+      {isModalOpen === 'GUEST' && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in">
+          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl animate-slide-up overflow-hidden">
+            <div className="p-8 lg:p-10 bg-blue-600 text-white flex justify-between items-center">
+              <h3 className="text-xl lg:text-2xl font-black uppercase italic leading-none">Registrasi Tamu</h3>
+              <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
+            </div>
+            <form onSubmit={submitGuest} className="p-8 lg:p-12 space-y-6">
+              <input type="text" required placeholder="Nama Lengkap Tamu..." className="w-full px-8 py-5 rounded-[1.5rem] bg-slate-50 border-2 border-transparent focus:border-blue-600 outline-none font-bold text-sm shadow-inner transition-all" value={guestForm.name} onChange={e => setGuestForm({...guestForm, name: e.target.value})} />
+              <select required className="w-full px-8 py-5 rounded-[1.5rem] bg-slate-50 outline-none font-bold text-sm" value={guestForm.visitToId} onChange={e => setGuestForm({...guestForm, visitToId: e.target.value})}>
+                 <option value="">-- Pilih Unit Tujuan --</option>
+                 {residents.sort((a,b) => a.block.localeCompare(b.block)).map(r => <option key={r.id} value={r.id}>{r.block}-{r.houseNumber} ({r.name})</option>)}
+              </select>
+              <textarea required placeholder="Keperluan Kunjungan..." className="w-full px-8 py-5 rounded-[1.5rem] bg-slate-50 outline-none font-bold text-sm min-h-[140px] shadow-inner transition-all" value={guestForm.purpose} onChange={e => setGuestForm({...guestForm, purpose: e.target.value})} />
+              <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-[2rem] font-black uppercase text-[10px] tracking-widest shadow-2xl active:scale-95 transition-all">DAFTARKAN MASUK</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL INCIDENT */}
+      {isModalOpen === 'INCIDENT' && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in">
+          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl animate-slide-up overflow-hidden">
+            <div className="p-8 lg:p-10 bg-red-600 text-white flex justify-between items-center">
+              <h3 className="text-xl lg:text-2xl font-black uppercase italic leading-none">Lapor Darurat</h3>
+              <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
+            </div>
+            <form onSubmit={submitIncident} className="p-8 lg:p-12 space-y-6">
+              <select required className="w-full px-8 py-5 rounded-[1.5rem] bg-slate-50 border-2 border-transparent focus:border-red-600 outline-none font-bold text-sm shadow-inner transition-all" value={incForm.type} onChange={e => setIncForm({...incForm, type: e.target.value})}>
+                 <option value="Pencurian">Pencurian</option>
+                 <option value="Kebakaran">Kebakaran</option>
+                 <option value="Kriminalitas">Kriminalitas</option>
+                 <option value="Gangguan">Gangguan Keamanan</option>
+                 <option value="Lainnya">Lainnya</option>
+              </select>
+              <input type="text" required placeholder="Lokasi Spesifik..." className="w-full px-8 py-5 rounded-[1.5rem] bg-slate-50 border-2 border-transparent focus:border-red-600 outline-none font-bold text-sm shadow-inner transition-all" value={incForm.location} onChange={e => setIncForm({...incForm, location: e.target.value})} />
+              <textarea required placeholder="Deskripsi kejadian..." className="w-full px-8 py-5 rounded-[1.5rem] bg-slate-50 border-2 border-transparent focus:border-red-600 outline-none font-bold text-sm min-h-[140px] shadow-inner transition-all" value={incForm.description} onChange={e => setIncForm({...incForm, description: e.target.value})} />
+              <button type="submit" className="w-full py-5 bg-red-600 text-white rounded-[2rem] font-black uppercase text-[10px] tracking-widest shadow-2xl active:scale-95 transition-all">KIRIM LAPORAN SEKARANG</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PATROL REPORT */}
+      {isModalOpen === 'PATROL_REPORT' && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl animate-slide-up overflow-hidden">
+            <div className={`p-8 lg:p-10 text-white flex justify-between items-center ${patrolAction.status === 'OK' ? 'bg-green-600' : 'bg-red-600'}`}>
+              <div>
+                <h3 className="text-xl lg:text-2xl font-black uppercase leading-none italic">{patrolAction.cp}</h3>
+                <p className="text-[10px] font-black uppercase opacity-70 mt-1 tracking-widest">Detail Laporan Patroli</p>
+              </div>
+              <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
+            </div>
+            <form onSubmit={submitPatrol} className="p-8 lg:p-12 space-y-6 lg:space-y-8">
+              <div className="space-y-2">
+                 <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Ambil Foto Area (Wajib):</label>
+                 <div className="flex flex-col gap-4">
+                    {patrolReportData.photo ? (
+                      <div className="relative group">
+                         <img src={patrolReportData.photo} alt="Preview" className="w-full h-48 lg:h-56 object-cover rounded-[2rem] border-2 border-slate-100 shadow-inner" />
+                         <button type="button" onClick={() => setPatrolReportData(prev => ({ ...prev, photo: '' }))} className="absolute top-4 right-4 p-3 bg-red-600 text-white rounded-2xl shadow-2xl active:scale-95 transition-all"><Trash2 size={20}/></button>
+                      </div>
+                    ) : (
+                      <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full h-48 lg:h-56 rounded-[2rem] bg-slate-50 border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-4 text-slate-400 hover:border-slate-400 transition-all group">
+                         <Camera size={48} className="group-hover:scale-110 transition-transform" />
+                         <span className="font-black text-[10px] uppercase tracking-widest">AKTIFKAN KAMERA</span>
+                      </button>
+                    )}
+                    <input type="file" ref={fileInputRef} accept="image/*" capture="environment" className="hidden" onChange={(e) => {
+                       const file = e.target.files?.[0];
+                       if (file) {
+                         const reader = new FileReader();
+                         reader.onloadend = () => setPatrolReportData(p => ({ ...p, photo: reader.result as string }));
+                         reader.readAsDataURL(file);
+                       }
+                    }} />
+                 </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Catatan Keamanan:</label>
+                <textarea required placeholder="Jelaskan kondisi detail..." className="w-full px-8 py-5 rounded-[1.5rem] bg-slate-50 border-2 border-transparent outline-none font-bold text-sm min-h-[140px] focus:border-slate-900 transition-all shadow-inner" value={patrolReportData.note} onChange={e => setPatrolReportData({...patrolReportData, note: e.target.value})} />
+              </div>
+              <button type="submit" className={`w-full py-5 text-white rounded-[2rem] font-black uppercase text-[10px] tracking-widest shadow-2xl active:scale-95 transition-all ${patrolAction.status === 'OK' ? 'bg-green-600' : 'bg-red-600'}`}>KIRIM LAPORAN CLOUD</button>
+            </form>
+          </div>
         </div>
       )}
 
