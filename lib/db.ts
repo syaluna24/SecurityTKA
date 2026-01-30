@@ -3,13 +3,13 @@ import { supabase } from '../services/supabaseService.ts';
 import { Resident, IncidentReport, PatrolLog, GuestLog, ChatMessage } from '../types.ts';
 
 /**
- * TKA PRISMA-BROWSER CLIENT (v3)
- * Menangani komunikasi data cloud dengan pola async/await yang bersih.
+ * TKA PRISMA-ENGINE CLIENT (v4.0)
+ * Sinkronisasi penuh dengan Supabase Realtime untuk semua modul.
  */
 export const db = {
   resident: {
     findMany: async () => {
-      const { data, error } = await supabase.from('residents').select('*').order('name');
+      const { data, error } = await supabase.from('residents').select('*').order('block', { ascending: true });
       if (error) throw error;
       return (data || []) as Resident[];
     },
@@ -29,7 +29,7 @@ export const db = {
     },
     subscribe: (callback: (payload: any) => void) => {
       return supabase
-        .channel('db-residents')
+        .channel('public:residents')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'residents' }, callback)
         .subscribe();
     }
@@ -45,9 +45,14 @@ export const db = {
       if (error) throw error;
       return data[0];
     },
+    update: async (id: string, payload: any) => {
+      const { data, error } = await supabase.from('incidents').update(payload).eq('id', id).select();
+      if (error) throw error;
+      return data[0];
+    },
     subscribe: (callback: (payload: any) => void) => {
       return supabase
-        .channel('db-incidents')
+        .channel('public:incidents')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents' }, callback)
         .subscribe();
     }
@@ -65,7 +70,7 @@ export const db = {
     },
     subscribe: (callback: (payload: any) => void) => {
       return supabase
-        .channel('db-patrol')
+        .channel('public:patrol_logs')
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'patrol_logs' }, callback)
         .subscribe();
     }
@@ -88,7 +93,7 @@ export const db = {
     },
     subscribe: (callback: (payload: any) => void) => {
       return supabase
-        .channel('db-guests')
+        .channel('public:guests')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'guests' }, callback)
         .subscribe();
     }
@@ -106,7 +111,7 @@ export const db = {
     },
     subscribe: (callback: (payload: any) => void) => {
       return supabase
-        .channel('db-chat')
+        .channel('public:chat_messages')
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, callback)
         .subscribe();
     }
