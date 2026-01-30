@@ -6,7 +6,9 @@ export default defineConfig({
   plugins: [react()],
   define: {
     'process.env': {
-      API_KEY: JSON.stringify(process.env.API_KEY)
+      API_KEY: JSON.stringify(process.env.API_KEY),
+      SUPABASE_URL: JSON.stringify(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL),
+      SUPABASE_ANON_KEY: JSON.stringify(process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
     }
   }
 });
