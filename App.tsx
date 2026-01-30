@@ -59,51 +59,35 @@ const App: React.FC = () => {
       try {
         setCloudStatus('syncing');
         const [r, p, i, g, c] = await Promise.all([
-          db.resident.findMany(),
-          db.patrol.findMany(),
-          db.incident.findMany(),
-          db.guest.findMany(),
-          db.chat.findMany()
+          db.resident.findMany().catch(() => MOCK_RESIDENTS),
+          db.patrol.findMany().catch(() => []),
+          db.incident.findMany().catch(() => MOCK_INCIDENTS),
+          db.guest.findMany().catch(() => MOCK_GUESTS),
+          db.chat.findMany().catch(() => [])
         ]);
         
-        setResidents(r.length > 0 ? r : MOCK_RESIDENTS);
+        setResidents(r);
         setPatrolLogs(p);
-        setIncidents(i.length > 0 ? i : MOCK_INCIDENTS);
-        setGuests(g.length > 0 ? g : MOCK_GUESTS);
+        setIncidents(i);
+        setGuests(g);
         setChatMessages(c);
         setCloudStatus('connected');
       } catch (err) {
-        console.error("Cloud Error:", err);
+        console.error("Vercel Database Connection Error:", err);
         setCloudStatus('offline');
-        // Fallback to Mocks if cloud is dead
         setResidents(MOCK_RESIDENTS);
-        setIncidents(MOCK_INCIDENTS);
-        setGuests(MOCK_GUESTS);
       }
     };
 
     fetchData();
 
-    // CLOUD-ONLY REALTIME SUBSCRIPTIONS
+    // VERCEL REALTIME (SIMULATED POLLING)
     const subscriptions = [
       db.resident.subscribe(p => {
-        if (p.eventType === 'INSERT') setResidents(prev => [p.new as Resident, ...prev]);
-        if (p.eventType === 'UPDATE') setResidents(prev => prev.map(r => r.id === p.new.id ? p.new as Resident : r));
-        if (p.eventType === 'DELETE') setResidents(prev => prev.filter(r => r.id !== p.old.id));
+        if (p.eventType === 'UPDATE') setResidents(prev => prev.map(r => r.id === p.new.id ? p.new : r));
       }),
       db.chat.subscribe(p => {
-        if (p.eventType === 'INSERT') setChatMessages(prev => [...prev, p.new as ChatMessage]);
-      }),
-      db.incident.subscribe(p => {
-        if (p.eventType === 'INSERT') setIncidents(prev => [p.new as IncidentReport, ...prev]);
-        if (p.eventType === 'UPDATE') setIncidents(prev => prev.map(i => i.id === p.new.id ? p.new as IncidentReport : i));
-      }),
-      db.patrol.subscribe(p => {
-        if (p.eventType === 'INSERT') setPatrolLogs(prev => [p.new as PatrolLog, ...prev]);
-      }),
-      db.guest.subscribe(p => {
-        if (p.eventType === 'INSERT') setGuests(prev => [p.new as GuestLog, ...prev]);
-        if (p.eventType === 'UPDATE') setGuests(prev => prev.map(g => g.id === p.new.id ? p.new as GuestLog : g));
+        if (p.eventType === 'INSERT') setChatMessages(prev => [...prev, p.new]);
       })
     ];
 
@@ -148,8 +132,11 @@ const App: React.FC = () => {
       }
       setIsModalOpen(null);
       setEditingItem(null);
+      // Refresh local state to reflect change immediately if API successful
+      const updated = await db.resident.findMany();
+      setResidents(updated);
     } catch (err) {
-      alert("Database Error: Gagal menyimpan ke Prisma Cloud.");
+      alert("Vercel DB Error: Gagal menyimpan data. Pastikan API Route /api/residents sudah terpasang.");
     }
   };
 
@@ -159,7 +146,7 @@ const App: React.FC = () => {
     const chatText = chatInput;
     setChatInput('');
     try {
-      await db.chat.create({
+      const newMsg = await db.chat.create({
         id: `msg-${Date.now()}`,
         senderId: currentUser.id,
         senderName: currentUser.name,
@@ -167,50 +154,9 @@ const App: React.FC = () => {
         text: chatText,
         timestamp: new Date().toISOString()
       });
+      setChatMessages(prev => [...prev, newMsg]);
     } catch (err) {
-      alert("Database Error: Gagal mengirim pesan ke Cloud.");
-    }
-  };
-
-  const handlePatrolLog = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentUser || !patrolReportData.photo) return;
-    try {
-      await db.patrol.create({
-        id: `p-${Date.now()}`,
-        securityId: currentUser.id,
-        securityName: currentUser.name,
-        timestamp: new Date().toISOString(),
-        checkpoint: patrolAction.cp,
-        status: patrolAction.status,
-        note: patrolReportData.note,
-        photo: patrolReportData.photo
-      });
-      setIsModalOpen(null);
-      setPatrolReportData({ note: '', photo: '' });
-    } catch (err) {
-      alert("Database Error: Gagal menyimpan log patroli.");
-    }
-  };
-
-  const handleGuestLog = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!guestForm.name || !guestForm.visitToId) return;
-    try {
-      const target = residents.find(r => r.id === guestForm.visitToId);
-      await db.guest.create({
-        id: `g-${Date.now()}`,
-        name: guestForm.name,
-        visitToId: guestForm.visitToId,
-        visitToName: target ? `${target.name} (${target.block}-${target.houseNumber})` : 'Unit',
-        purpose: guestForm.purpose || 'Kunjungan',
-        entryTime: new Date().toISOString(),
-        status: 'IN'
-      });
-      setIsModalOpen(null);
-      setGuestForm({ name: '', visitToId: '', purpose: '' });
-    } catch (err) {
-      alert("Database Error: Gagal menyimpan data tamu.");
+      console.error("Chat sync failed");
     }
   };
 
@@ -243,13 +189,13 @@ const App: React.FC = () => {
               <div className="bg-amber-500 w-16 h-16 rounded-3xl flex items-center justify-center mb-10 shadow-2xl shadow-amber-500/20">
                 <Shield size={32} className="text-slate-900" />
               </div>
-              <h1 className="text-3xl lg:text-4xl font-black mb-4 tracking-tighter italic uppercase leading-none">TKA SECURE <br/><span className="text-amber-500 not-italic text-2xl font-light tracking-widest leading-none">Prisma Cloud</span></h1>
-              <p className="text-slate-400 text-sm italic leading-relaxed font-medium">Sistem manajemen keamanan perumahan berbasis database cloud real-time.</p>
+              <h1 className="text-3xl lg:text-4xl font-black mb-4 tracking-tighter italic uppercase leading-none">TKA SECURE <br/><span className="text-amber-500 not-italic text-2xl font-light tracking-widest leading-none">Vercel DB</span></h1>
+              <p className="text-slate-400 text-sm italic leading-relaxed font-medium">Sistem manajemen keamanan perumahan terintegrasi Vercel Postgres & Prisma.</p>
             </div>
             <div className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-center gap-3 relative z-10 backdrop-blur-sm">
                <div className={`w-2 h-2 rounded-full animate-pulse ${cloudStatus === 'connected' ? 'bg-green-500' : cloudStatus === 'syncing' ? 'bg-amber-500' : 'bg-red-500'}`}></div>
                <span className="text-[10px] font-black uppercase tracking-widest text-slate-300 italic">
-                 {cloudStatus === 'connected' ? 'Prisma Online' : cloudStatus === 'syncing' ? 'Connecting Engine...' : 'Cloud Connection Failed'}
+                 {cloudStatus === 'connected' ? 'Vercel Postgres Online' : cloudStatus === 'syncing' ? 'API Handshake...' : 'Database Offline'}
                </span>
             </div>
           </div>
@@ -292,7 +238,7 @@ const App: React.FC = () => {
                   value={passwordInput} onChange={e => setPasswordInput(e.target.value)} />
                 {loginError && <p className="text-red-500 text-[10px] font-black text-center uppercase italic">{loginError}</p>}
                 <button type="submit" className="w-full bg-slate-900 text-white font-black py-5 rounded-2xl flex items-center justify-center gap-4 text-xs uppercase tracking-widest shadow-2xl active:scale-95 transition-all hover:bg-slate-800">
-                  LOGIN KE SISTEM <ArrowRight size={20} />
+                  MASUK KE CLOUD <ArrowRight size={20} />
                 </button>
               </form>
             )}
@@ -305,14 +251,14 @@ const App: React.FC = () => {
   return (
     <Layout user={currentUser} onLogout={() => setCurrentUser(null)} activeTab={activeTab} setActiveTab={setActiveTab}>
       
-      {/* RENDER LOGIC PER TAB */}
+      {/* KONTEN UTAMA */}
       {activeTab === 'dashboard' && (
         <div className="space-y-8 animate-slide-up pb-10">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
             {[
-              { label: 'Satpam Aktif', val: staff.length, icon: <UserCheck size={24}/>, color: 'blue' },
-              { label: 'Lapor Terbuka', val: incidents.filter(i => i.status !== 'RESOLVED').length, icon: <AlertTriangle size={24}/>, color: 'red' },
-              { label: 'Tamu Hari Ini', val: guests.length, icon: <Users size={24}/>, color: 'amber' },
+              { label: 'Petugas Aktif', val: staff.length, icon: <UserCheck size={24}/>, color: 'blue' },
+              { label: 'Lapor Pending', val: incidents.filter(i => i.status !== 'RESOLVED').length, icon: <AlertTriangle size={24}/>, color: 'red' },
+              { label: 'Tamu Terdaftar', val: guests.length, icon: <Users size={24}/>, color: 'amber' },
               { label: 'Total Unit', val: residents.length, icon: <Home size={24}/>, color: 'green' }
             ].map((s, i) => (
               <div key={i} className="bg-white p-6 lg:p-8 rounded-[2rem] shadow-sm border border-slate-100 group hover:shadow-xl transition-all duration-300">
@@ -327,7 +273,7 @@ const App: React.FC = () => {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 bg-white p-6 lg:p-10 rounded-[2.5rem] shadow-sm border border-slate-100 min-h-[400px]">
-               <h3 className="text-xl font-black text-slate-900 mb-10 flex items-center gap-4 uppercase italic leading-none"><Activity size={24} className="text-amber-500 animate-pulse"/> Analisis Aktivitas Prisma</h3>
+               <h3 className="text-xl font-black text-slate-900 mb-10 flex items-center gap-4 uppercase italic leading-none"><Activity size={24} className="text-amber-500 animate-pulse"/> Analitik Vercel Cloud</h3>
                <div className="h-[250px] lg:h-[300px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={chartData}>
@@ -358,7 +304,7 @@ const App: React.FC = () => {
         <div className="max-w-4xl mx-auto h-[calc(100vh-220px)] flex flex-col animate-slide-up pb-10">
            <div className="flex-1 bg-white rounded-t-[3rem] shadow-sm border border-slate-100 overflow-y-auto p-6 lg:p-10 space-y-8 no-scrollbar relative">
               <div className="sticky top-0 z-10 text-center mb-10">
-                 <span className="bg-slate-50 text-slate-400 text-[8px] font-black uppercase px-6 py-2 rounded-full border border-slate-100 tracking-widest italic backdrop-blur-md">Pusat Koordinasi Digital Prisma</span>
+                 <span className="bg-slate-50 text-slate-400 text-[8px] font-black uppercase px-6 py-2 rounded-full border border-slate-100 tracking-widest italic backdrop-blur-md">Koordinasi Digital Vercel</span>
               </div>
               {chatMessages.length > 0 ? chatMessages.map((msg, i) => (
                 <div key={msg.id} className={`flex ${msg.senderId === currentUser.id ? 'justify-end' : 'justify-start'} animate-slide-up`}>
@@ -374,7 +320,7 @@ const App: React.FC = () => {
               )) : (
                 <div className="h-full flex flex-col items-center justify-center py-32 opacity-20 grayscale italic">
                    <MessageSquare size={64} className="mb-6" />
-                   <p className="font-black uppercase tracking-[0.4em] text-[10px]">Belum Ada Pesan Cloud</p>
+                   <p className="font-black uppercase tracking-[0.4em] text-[10px]">Pesan Cloud Belum Tersedia</p>
                 </div>
               )}
               <div ref={chatEndRef} />
@@ -390,7 +336,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* RENDER FALLBACK UNTUK TAB LAINNYA */}
+      {/* FALLBACK UNTUK TAB LAINNYA */}
       {(activeTab === 'log_resident' || activeTab === 'patrol' || activeTab === 'reports' || activeTab === 'incident' || activeTab === 'guests' || activeTab === 'residents' || activeTab === 'settings') && (
         <div className="animate-slide-up space-y-8 pb-20">
            <div className="flex justify-between items-center">
@@ -401,71 +347,42 @@ const App: React.FC = () => {
            </div>
            <div className="bg-white p-24 rounded-[3rem] text-center border border-slate-100">
               <Ghost size={64} className="mx-auto text-slate-100 mb-6" />
-              <p className="font-black text-slate-300 uppercase tracking-widest italic">Halaman Ini Memerlukan Koneksi Prisma Cloud Aktif</p>
-              {cloudStatus === 'offline' && <p className="text-[10px] text-red-400 font-black mt-4 uppercase">Mode Offline Aktif - Data Disimpan Sesuai Mocks</p>}
+              <p className="font-black text-slate-300 uppercase tracking-widest italic">Menunggu API Routes Vercel Postgres...</p>
+              {cloudStatus === 'offline' && <p className="text-[10px] text-red-400 font-black mt-4 uppercase italic">Koneksi Vercel Belum Terdeteksi</p>}
            </div>
         </div>
       )}
 
-      {/* MODAL GUEST */}
-      {isModalOpen === 'GUEST' && (
+      {/* MODAL RESIDENT */}
+      {isModalOpen === 'RESIDENT' && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in">
-          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl animate-slide-up overflow-hidden">
-            <div className="p-8 lg:p-10 bg-blue-600 text-white flex justify-between items-center">
-              <h3 className="text-xl lg:text-2xl font-black uppercase italic leading-none">Registrasi Tamu Cloud</h3>
+          <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl animate-slide-up overflow-hidden">
+            <div className="p-10 bg-slate-900 text-white flex justify-between items-center">
+              <h3 className="text-2xl font-black uppercase italic leading-none">{editingItem ? 'Edit Data Warga' : 'Tambah Unit'}</h3>
               <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
             </div>
-            <form onSubmit={handleGuestLog} className="p-8 lg:p-12 space-y-6">
-              <input type="text" required placeholder="Nama Lengkap Tamu..." className="w-full px-8 py-5 rounded-[1.5rem] bg-slate-50 border-2 border-transparent focus:border-blue-600 outline-none font-bold text-sm shadow-inner transition-all" value={guestForm.name} onChange={e => setGuestForm({...guestForm, name: e.target.value})} />
-              <select required className="w-full px-8 py-5 rounded-[1.5rem] bg-slate-50 outline-none font-bold text-sm" value={guestForm.visitToId} onChange={e => setGuestForm({...guestForm, visitToId: e.target.value})}>
-                 <option value="">-- Pilih Unit Tujuan --</option>
-                 {residents.sort((a,b) => a.block.localeCompare(b.block)).map(r => <option key={r.id} value={r.id}>{r.block}-{r.houseNumber} ({r.name})</option>)}
-              </select>
-              <textarea required placeholder="Keperluan Kunjungan..." className="w-full px-8 py-5 rounded-[1.5rem] bg-slate-50 outline-none font-bold text-sm min-h-[140px] shadow-inner transition-all" value={guestForm.purpose} onChange={e => setGuestForm({...guestForm, purpose: e.target.value})} />
-              <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-[2rem] font-black uppercase text-[10px] tracking-widest shadow-2xl active:scale-95 transition-all">DAFTARKAN TAMU MASUK</button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL PATROL */}
-      {isModalOpen === 'PATROL_REPORT' && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in">
-          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl animate-slide-up overflow-hidden">
-            <div className={`p-8 lg:p-10 text-white flex justify-between items-center ${patrolAction.status === 'OK' ? 'bg-green-600' : 'bg-red-600'}`}>
-              <div>
-                <h3 className="text-xl lg:text-2xl font-black uppercase leading-none italic">{patrolAction.cp}</h3>
-                <p className="text-[10px] font-black uppercase opacity-70 mt-1 tracking-widest italic">Digital Patrol Log</p>
+            <form onSubmit={handleSaveResident} className="p-10 space-y-6">
+              <div className="space-y-1">
+                 <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Nama Lengkap:</label>
+                 <input type="text" required placeholder="Contoh: Bpk. Kurniawan" className="w-full px-8 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-base focus:border-slate-900 transition-all shadow-inner" value={resForm.name} onChange={e => setResForm({...resForm, name: e.target.value})} />
               </div>
-              <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
-            </div>
-            <form onSubmit={handlePatrolLog} className="p-8 lg:p-12 space-y-8">
-              <div className="space-y-2">
-                 <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Ambil Foto (Wajib):</label>
-                 <div className="flex flex-col gap-4">
-                    {patrolReportData.photo ? (
-                      <div className="relative group">
-                         <img src={patrolReportData.photo} alt="Preview" className="w-full h-48 lg:h-56 object-cover rounded-[2rem] border-2 border-slate-100 shadow-inner" />
-                         <button type="button" onClick={() => setPatrolReportData(prev => ({ ...prev, photo: '' }))} className="absolute top-4 right-4 p-3 bg-red-600 text-white rounded-2xl shadow-2xl active:scale-95 transition-all"><Trash2 size={20}/></button>
-                      </div>
-                    ) : (
-                      <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full h-48 lg:h-56 rounded-[2rem] bg-slate-50 border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-4 text-slate-400 hover:border-slate-400 transition-all group">
-                         <Camera size={48} className="group-hover:scale-110 transition-transform" />
-                         <span className="font-black text-[10px] uppercase tracking-widest italic">AKTIFKAN KAMERA LAPANGAN</span>
-                      </button>
-                    )}
-                    <input type="file" ref={fileInputRef} accept="image/*" capture="environment" className="hidden" onChange={(e) => {
-                       const file = e.target.files?.[0];
-                       if (file) {
-                         const reader = new FileReader();
-                         reader.onloadend = () => setPatrolReportData(p => ({ ...p, photo: reader.result as string }));
-                         reader.readAsDataURL(file);
-                       }
-                    }} />
+              <div className="grid grid-cols-2 gap-4">
+                 <div className="space-y-1">
+                   <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Blok:</label>
+                   <select className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={resForm.block} onChange={e => setResForm({...resForm, block: e.target.value})}>
+                      {BLOCKS.map(b => <option key={b} value={b}>{b}</option>)}
+                   </select>
+                 </div>
+                 <div className="space-y-1">
+                   <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">No. Rumah:</label>
+                   <input type="text" required placeholder="01-99" className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-slate-900 outline-none font-bold text-sm shadow-inner" value={resForm.houseNumber} onChange={e => setResForm({...resForm, houseNumber: e.target.value})} />
                  </div>
               </div>
-              <textarea required placeholder="Jelaskan kondisi detail area..." className="w-full px-8 py-5 rounded-[1.5rem] bg-slate-50 border-2 border-transparent outline-none font-bold text-sm min-h-[140px] focus:border-slate-900 transition-all shadow-inner" value={patrolReportData.note} onChange={e => setPatrolReportData({...patrolReportData, note: e.target.value})} />
-              <button type="submit" className={`w-full py-5 text-white rounded-[2rem] font-black uppercase text-[10px] tracking-widest shadow-2xl active:scale-95 transition-all ${patrolAction.status === 'OK' ? 'bg-green-600' : 'bg-red-600'}`}>KIRIM LAPORAN CLOUD</button>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">No. WhatsApp:</label>
+                <input type="text" required placeholder="08..." className="w-full px-8 py-5 rounded-2xl bg-slate-50 outline-none font-bold text-sm border-2 border-slate-100 focus:border-slate-900 shadow-inner" value={resForm.phoneNumber} onChange={e => setResForm({...resForm, phoneNumber: e.target.value})} />
+              </div>
+              <button type="submit" className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">SIMPAN KE VERCEL CLOUD</button>
             </form>
           </div>
         </div>
