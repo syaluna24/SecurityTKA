@@ -3,8 +3,8 @@ import { supabase } from '../services/supabaseService.ts';
 import { Resident, IncidentReport, PatrolLog, GuestLog, ChatMessage } from '../types.ts';
 
 /**
- * TKA PRISMA-ENGINE CLIENT (v5.0)
- * Interface akses data standar industri untuk sinkronisasi Vercel/Supabase Cloud.
+ * TKA PRISMA-CLOUD BRIDGE (v6.0)
+ * Mengabstraksi koneksi ke database Vercel/Supabase dengan pola pemanggilan Prisma.
  */
 export const db = {
   resident: {
@@ -22,10 +22,6 @@ export const db = {
       const { data, error } = await supabase.from('residents').update(payload).eq('id', id).select();
       if (error) throw error;
       return data[0] as Resident;
-    },
-    delete: async (id: string) => {
-      const { error } = await supabase.from('residents').delete().eq('id', id);
-      if (error) throw error;
     },
     subscribe: (callback: (payload: any) => void) => {
       return supabase
