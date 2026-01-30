@@ -1,20 +1,32 @@
 
 import { supabase } from '../services/supabaseService.ts';
-import { Resident, IncidentReport, PatrolLog, GuestLog, ChatMessage, User } from '../types.ts';
+import { Resident, IncidentReport, PatrolLog, GuestLog, ChatMessage } from '../types.ts';
 
-// Prisma-like interface for frontend usage
-// Ini bertindak sebagai wrapper sehingga App.tsx bisa menggunakan db.resident.findMany()
+/**
+ * PRISMA-LIKE BROWSER CLIENT
+ * Memberikan pengalaman coding Prisma di Frontend dengan sinkronisasi Cloud Supabase
+ */
 export const db = {
   resident: {
     findMany: async () => {
       const { data } = await supabase.from('residents').select('*').order('name');
       return (data || []) as Resident[];
     },
-    update: async (id: string, payload: Partial<Resident>) => {
-      return supabase.from('residents').update(payload).eq('id', id);
+    create: async (data: Partial<Resident>) => {
+      return await supabase.from('residents').insert(data).select().single();
     },
-    create: async (payload: any) => {
-      return supabase.from('residents').insert(payload);
+    update: async (id: string, data: Partial<Resident>) => {
+      return await supabase.from('residents').update(data).eq('id', id).select().single();
+    },
+    delete: async (id: string) => {
+      return await supabase.from('residents').delete().eq('id', id);
+    },
+    // Custom Real-time hook
+    subscribe: (callback: (payload: any) => void) => {
+      return supabase
+        .channel('public:residents')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'residents' }, callback)
+        .subscribe();
     }
   },
   incident: {
@@ -22,8 +34,14 @@ export const db = {
       const { data } = await supabase.from('incidents').select('*').order('timestamp', { ascending: false });
       return (data || []) as IncidentReport[];
     },
-    create: async (payload: any) => {
-      return supabase.from('incidents').insert(payload);
+    create: async (data: Partial<IncidentReport>) => {
+      return await supabase.from('incidents').insert(data).select().single();
+    },
+    subscribe: (callback: (payload: any) => void) => {
+      return supabase
+        .channel('public:incidents')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents' }, callback)
+        .subscribe();
     }
   },
   patrol: {
@@ -31,17 +49,14 @@ export const db = {
       const { data } = await supabase.from('patrol_logs').select('*').order('timestamp', { ascending: false });
       return (data || []) as PatrolLog[];
     },
-    create: async (payload: any) => {
-      return supabase.from('patrol_logs').insert(payload);
-    }
-  },
-  guest: {
-    findMany: async () => {
-      const { data } = await supabase.from('guests').select('*').order('entryTime', { ascending: false });
-      return (data || []) as GuestLog[];
+    create: async (data: Partial<PatrolLog>) => {
+      return await supabase.from('patrol_logs').insert(data).select().single();
     },
-    create: async (payload: any) => {
-      return supabase.from('guests').insert(payload);
+    subscribe: (callback: (payload: any) => void) => {
+      return supabase
+        .channel('public:patrol_logs')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'patrol_logs' }, callback)
+        .subscribe();
     }
   },
   chat: {
@@ -49,8 +64,14 @@ export const db = {
       const { data } = await supabase.from('chat_messages').select('*').order('timestamp', { ascending: true });
       return (data || []) as ChatMessage[];
     },
-    create: async (payload: any) => {
-      return supabase.from('chat_messages').insert(payload);
+    create: async (data: Partial<ChatMessage>) => {
+      return await supabase.from('chat_messages').insert(data).select().single();
+    },
+    subscribe: (callback: (payload: any) => void) => {
+      return supabase
+        .channel('public:chat_messages')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, callback)
+        .subscribe();
     }
   }
 };
