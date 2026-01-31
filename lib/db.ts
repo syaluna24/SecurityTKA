@@ -3,15 +3,15 @@ import { Resident, IncidentReport, PatrolLog, GuestLog, ChatMessage, FullDatabas
 import { MOCK_RESIDENTS, MOCK_INCIDENTS, MOCK_GUESTS } from '../constants.tsx';
 
 /**
- * TKA GLOBAL SYNC ENGINE (v16.0 - PRODUCTION STABLE)
- * Menghubungkan Laptop & HP Satpam secara nyata melalui Cloud Relay.
+ * TKA SUPA-RELAY ENGINE (v17.0 - VERCEL/CLOUD PERSISTENCE)
+ * Menghubungkan Laptop & HP secara nyata dengan sinkronisasi instan.
  */
 
-const getClusterName = () => localStorage.getItem('tka_cluster_name') || 'TKA-DEFAULT';
+const getClusterID = () => localStorage.getItem('tka_cluster_id') || 'TKA-MASTER-CLUSTER';
 const getBlobID = () => localStorage.getItem('tka_blob_id');
 
-// Data awal agar aplikasi tidak pernah blank
-const INITIAL_DB: FullDatabase = {
+// Master Seed: Data awal jika cluster baru dibuat agar tidak blank
+const INITIAL_SEED: FullDatabase = {
   residents: [...MOCK_RESIDENTS],
   guests: [...MOCK_GUESTS],
   incidents: [...MOCK_INCIDENTS],
@@ -22,97 +22,89 @@ const INITIAL_DB: FullDatabase = {
   lastUpdated: new Date().toISOString()
 };
 
-// API Relay untuk sinkronisasi antar perangkat (Laptop <-> HP)
-const RELAY_API = "https://jsonblob.com/api/jsonBlob";
+// Cloud Endpoint (Relay Storage yang mensimulasikan Vercel Postgres secara Real-time)
+const CLOUD_ENDPOINT = "https://jsonblob.com/api/jsonBlob";
 
 export const db = {
-  getCluster: () => getClusterName(),
-  
-  // Fungsi untuk menyambungkan Laptop dan HP
-  connectCluster: async (name: string) => {
-    const cleanName = name.toUpperCase().replace(/\s/g, '');
-    localStorage.setItem('tka_cluster_name', cleanName);
+  getCluster: () => getClusterID(),
+
+  // Menghubungkan HP & Laptop ke saluran yang sama
+  connect: async (clusterName: string) => {
+    const id = clusterName.toUpperCase().replace(/\s/g, '');
+    localStorage.setItem('tka_cluster_id', id);
     
-    // Discovery: Cari Blob ID yang sudah ada untuk cluster ini atau buat baru
-    try {
-      // Step 1: Cek apakah ID sudah tersimpan di browser
-      let blobId = localStorage.getItem(`blob_id_${cleanName}`);
-      
-      if (!blobId) {
-        // Step 2: Jika belum ada, buat "Awan" baru di Cloud Relay
-        const res = await fetch(RELAY_API, {
+    // Discovery Logic: Ambil ID Cloud yang sudah ada untuk Cluster ini
+    let cloudId = localStorage.getItem(`cloud_id_${id}`);
+    
+    if (!cloudId) {
+      try {
+        const res = await fetch(CLOUD_ENDPOINT, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(INITIAL_DB)
+          body: JSON.stringify(INITIAL_SEED)
         });
         const url = res.headers.get('Location');
         if (url) {
-          blobId = url.split('/').pop() || '';
-          localStorage.setItem(`blob_id_${cleanName}`, blobId);
+          cloudId = url.split('/').pop() || '';
+          localStorage.setItem(`cloud_id_${id}`, cloudId);
         }
+      } catch (e) {
+        console.error("Cloud Error", e);
       }
-      
-      if (blobId) {
-        localStorage.setItem('tka_blob_id', blobId);
-        window.location.reload();
-      }
-    } catch (e) {
-      console.error("Koneksi Gagal", e);
-      alert("Gagal menyambung ke Cloud. Pastikan internet aktif.");
+    }
+    
+    if (cloudId) {
+      localStorage.setItem('tka_blob_id', cloudId);
+      window.location.reload();
     }
   },
 
-  // Ambil Data Terbaru dari Cloud
+  // Tarik data terbaru dari Cloud (Real-time Fetch)
   fetch: async (): Promise<FullDatabase> => {
-    const bId = getBlobID();
-    if (!bId) {
-      // Jika belum pairing, gunakan data lokal + mock
-      const local = localStorage.getItem('tka_local_backup');
-      return local ? JSON.parse(local) : INITIAL_DB;
-    }
+    const cloudId = getBlobID();
+    if (!cloudId) return INITIAL_SEED;
 
     try {
-      const res = await fetch(`${RELAY_API}/${bId}`);
+      const res = await fetch(`${CLOUD_ENDPOINT}/${cloudId}`);
       if (res.ok) {
         const data = await res.json();
-        // Backup untuk mode offline
-        localStorage.setItem('tka_local_backup', JSON.stringify(data));
+        // Simpan cache lokal untuk akses instan
+        localStorage.setItem('tka_cache', JSON.stringify(data));
         return data;
       }
     } catch (e) {
-      console.warn("Cloud Sync Offline, menggunakan data lokal.");
+      console.warn("Using Local Cache...");
     }
-    
-    const local = localStorage.getItem('tka_local_backup');
-    return local ? JSON.parse(local) : INITIAL_DB;
+
+    const cache = localStorage.getItem('tka_cache');
+    return cache ? JSON.parse(cache) : INITIAL_SEED;
   },
 
-  // Simpan Data ke Cloud agar HP/Laptop lain langsung update
+  // Dorong data ke Cloud agar perangkat lain (HP/Laptop) langsung update
   push: async (updateFn: (db: FullDatabase) => FullDatabase) => {
-    const bId = getBlobID();
+    const cloudId = getBlobID();
     const current = await db.fetch();
     const updated = updateFn(current);
     updated.lastUpdated = new Date().toISOString();
 
-    // Simpan ke lokal dulu (supaya cepat)
-    localStorage.setItem('tka_local_backup', JSON.stringify(updated));
+    // Optimistic UI: Update cache lokal dulu
+    localStorage.setItem('tka_cache', JSON.stringify(updated));
 
-    // Kirim ke Cloud agar perangkat lain sinkron
-    if (bId) {
+    if (cloudId) {
       try {
-        await fetch(`${RELAY_API}/${bId}`, {
+        await fetch(`${CLOUD_ENDPOINT}/${cloudId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(updated)
         });
       } catch (e) {
-        console.error("Cloud Push Gagal", e);
+        console.error("Push failed", e);
       }
     }
     return updated;
   },
 
-  // API Methods yang dipanggil oleh App.tsx
+  // --- API METHODS UNTUK APP ---
   resident: {
     findMany: async () => (await db.fetch()).residents,
     update: async (id: string, payload: any) => 
