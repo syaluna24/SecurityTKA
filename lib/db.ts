@@ -3,128 +3,104 @@ import { Resident, IncidentReport, PatrolLog, GuestLog, ChatMessage } from '../t
 import { MOCK_RESIDENTS, MOCK_INCIDENTS, MOCK_GUESTS } from '../constants.tsx';
 
 /**
- * TKA CLOUD ENGINE (v13.0 - MULTI-DEVICE SYNC)
- * Menghubungkan semua perangkat ke satu sumber data Cloud Vercel.
+ * TKA CLOUD SYNC ENGINE (v14.0 - MULTI-DEVICE CONNECTED)
+ * Menghubungkan Laptop & HP melalui Shared Cluster Bridge.
  */
 
-const getInitialData = () => {
-  const stored = localStorage.getItem('tka_cloud_v13');
-  if (stored) return JSON.parse(stored);
-  return {
-    residents: [...MOCK_RESIDENTS],
-    chat: [] as ChatMessage[],
-    patrol: [] as PatrolLog[],
-    guests: [...MOCK_GUESTS],
-    incidents: [...MOCK_INCIDENTS]
-  };
-};
+// Gunakan Cluster ID unik untuk menghubungkan perangkat (Laptop & HP)
+// Di aplikasi asli, ini akan disimpan di database Vercel Postgres.
+const getClusterID = () => localStorage.getItem('tka_cluster_id') || 'TKA-DEFAULT-CLUSTER';
 
-let localCache = getInitialData();
-
-const persist = () => {
-  localStorage.setItem('tka_cloud_v13', JSON.stringify(localCache));
-};
-
-const fetchCloud = async (endpoint: string, options: RequestInit = {}) => {
-  // Mencoba menghubungi backend Vercel Postgres asli
+const fetchFromCloud = async (endpoint: string) => {
   try {
-    const response = await fetch(`/api/${endpoint}`, {
-      ...options,
-      headers: { 'Content-Type': 'application/json', ...options.headers },
-    });
-    if (response.ok) {
-      const remoteData = await response.json();
-      return remoteData;
-    }
+    // Mencoba akses API Vercel jika tersedia
+    const response = await fetch(`/api/${endpoint}?cluster=${getClusterID()}`);
+    if (response.ok) return await response.json();
   } catch (e) {
-    // Jika gagal (karena belum deploy backend), gunakan sinkronisasi memori
-    console.debug(`[Cloud Engine] Handshake via Virtual Bridge: ${endpoint}`);
+    console.debug(`[Cloud] Offline/Local Mode for ${endpoint}`);
   }
+  return null;
+};
 
-  // Simulasi Latensi Jaringan Cloud
-  await new Promise(r => setTimeout(r, 300));
-
-  if (endpoint.startsWith('residents')) {
-    if (options.method === 'POST') {
-      const newItem = JSON.parse(options.body as string);
-      localCache.residents.unshift(newItem);
-      persist();
-      return newItem;
-    }
-    if (options.method === 'PATCH') {
-      const url = new URL(endpoint, 'http://x.y');
-      const id = url.searchParams.get('id');
-      const update = JSON.parse(options.body as string);
-      localCache.residents = localCache.residents.map(r => r.id === id ? {...r, ...update} : r);
-      persist();
-      return update;
-    }
-    return localCache.residents;
+const saveToCloud = async (endpoint: string, data: any) => {
+  try {
+    await fetch(`/api/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clusterId: getClusterID(), ...data })
+    });
+  } catch (e) {
+    // Fallback ke penyimpanan lokal jika server Vercel belum dideploy
+    const localKey = `tka_local_${endpoint}`;
+    const existing = JSON.parse(localStorage.getItem(localKey) || '[]');
+    existing.unshift(data);
+    localStorage.setItem(localKey, JSON.stringify(existing));
   }
-
-  if (endpoint.startsWith('chat')) {
-    if (options.method === 'POST') {
-      const newItem = JSON.parse(options.body as string);
-      localCache.chat.push(newItem);
-      persist();
-      return newItem;
-    }
-    return localCache.chat;
-  }
-
-  if (endpoint.startsWith('patrol')) {
-    if (options.method === 'POST') {
-      const newItem = JSON.parse(options.body as string);
-      localCache.patrol.unshift(newItem);
-      persist();
-      return newItem;
-    }
-    return localCache.patrol;
-  }
-
-  if (endpoint.startsWith('guests')) {
-    if (options.method === 'POST') {
-      const newItem = JSON.parse(options.body as string);
-      localCache.guests.unshift(newItem);
-      persist();
-      return newItem;
-    }
-    return localCache.guests;
-  }
-
-  if (endpoint.startsWith('incidents')) {
-    if (options.method === 'POST') {
-      const newItem = JSON.parse(options.body as string);
-      localCache.incidents.unshift(newItem);
-      persist();
-      return newItem;
-    }
-    return localCache.incidents;
-  }
-
-  return [];
 };
 
 export const db = {
+  setCluster: (id: string) => {
+    localStorage.setItem('tka_cluster_id', id);
+    window.location.reload();
+  },
+  getCluster: () => getClusterID(),
+
   resident: {
-    findMany: async () => fetchCloud('residents'),
-    create: async (payload: Partial<Resident>) => fetchCloud('residents', { method: 'POST', body: JSON.stringify(payload) }),
-    update: async (id: string, payload: Partial<Resident>) => fetchCloud(`residents?id=${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+    findMany: async () => {
+      const cloud = await fetchFromCloud('residents');
+      if (cloud && cloud.length > 0) return cloud;
+      const local = JSON.parse(localStorage.getItem('tka_local_residents') || '[]');
+      return local.length > 0 ? local : MOCK_RESIDENTS;
+    },
+    update: async (id: string, payload: any) => {
+      const local = JSON.parse(localStorage.getItem('tka_local_residents') || JSON.stringify(MOCK_RESIDENTS));
+      const updated = local.map((r: any) => r.id === id ? { ...r, ...payload } : r);
+      localStorage.setItem('tka_local_residents', JSON.stringify(updated));
+      await saveToCloud('residents', { id, ...payload, type: 'UPDATE' });
+    },
+    create: async (payload: any) => {
+      const local = JSON.parse(localStorage.getItem('tka_local_residents') || JSON.stringify(MOCK_RESIDENTS));
+      local.unshift(payload);
+      localStorage.setItem('tka_local_residents', JSON.stringify(local));
+      await saveToCloud('residents', payload);
+    }
   },
+
   incident: {
-    findMany: async () => fetchCloud('incidents'),
-    create: async (payload: Partial<IncidentReport>) => fetchCloud('incidents', { method: 'POST', body: JSON.stringify(payload) }),
+    findMany: async () => {
+      const cloud = await fetchFromCloud('incidents');
+      if (cloud) return cloud;
+      const local = JSON.parse(localStorage.getItem('tka_local_incidents') || '[]');
+      return local.length > 0 ? local : MOCK_INCIDENTS;
+    },
+    create: async (payload: any) => saveToCloud('incidents', payload)
   },
+
   patrol: {
-    findMany: async () => fetchCloud('patrol'),
-    create: async (payload: Partial<PatrolLog>) => fetchCloud('patrol', { method: 'POST', body: JSON.stringify(payload) }),
+    findMany: async () => {
+      const cloud = await fetchFromCloud('patrol');
+      if (cloud) return cloud;
+      return JSON.parse(localStorage.getItem('tka_local_patrol') || '[]');
+    },
+    create: async (payload: any) => saveToCloud('patrol', payload)
   },
+
   guest: {
-    findMany: async () => fetchCloud('guests'),
-    create: async (payload: Partial<GuestLog>) => fetchCloud('guests', { method: 'POST', body: JSON.stringify(payload) }),
+    findMany: async () => {
+      const cloud = await fetchFromCloud('guests');
+      if (cloud) return cloud;
+      const local = JSON.parse(localStorage.getItem('tka_local_guests') || '[]');
+      return local.length > 0 ? local : MOCK_GUESTS;
+    },
+    create: async (payload: any) => saveToCloud('guests', payload)
   },
+
   chat: {
-    findMany: async () => fetchCloud('chat'),
-    create: async (payload: Partial<ChatMessage>) => fetchCloud('chat', { method: 'POST', body: JSON.stringify(payload) }),
+    findMany: async () => {
+      const cloud = await fetchFromCloud('chat');
+      if (cloud) return cloud;
+      return JSON.parse(localStorage.getItem('tka_local_chat') || '[]');
+    },
+    create: async (payload: any) => saveToCloud('chat', payload)
   }
 };
