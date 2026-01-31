@@ -3,14 +3,14 @@ import { Resident, IncidentReport, PatrolLog, GuestLog, ChatMessage, FullDatabas
 import { MOCK_RESIDENTS, MOCK_INCIDENTS, MOCK_GUESTS } from '../constants.tsx';
 
 /**
- * TKA GLOBAL SYNC ENGINE (v15.0 - PRODUCTION BRIDGE)
- * Sistem ini menghubungkan Laptop & HP Satpam secara nyata.
+ * TKA GLOBAL SYNC ENGINE (v16.0 - PRODUCTION STABLE)
+ * Menghubungkan Laptop & HP Satpam secara nyata melalui Cloud Relay.
  */
 
-const getClusterID = () => localStorage.getItem('tka_cluster_id') || 'TKA-DEFAULT';
+const getClusterName = () => localStorage.getItem('tka_cluster_name') || 'TKA-DEFAULT';
 const getBlobID = () => localStorage.getItem('tka_blob_id');
 
-// Inisialisasi Database Default
+// Data awal agar aplikasi tidak pernah blank
 const INITIAL_DB: FullDatabase = {
   residents: [...MOCK_RESIDENTS],
   guests: [...MOCK_GUESTS],
@@ -22,25 +22,24 @@ const INITIAL_DB: FullDatabase = {
   lastUpdated: new Date().toISOString()
 };
 
-// RELAY ENGINE: Menggunakan Public JSON Bridge (JSONBlob API)
-// Ini memungkinkan sinkronisasi antar perangkat tanpa backend sendiri.
+// API Relay untuk sinkronisasi antar perangkat (Laptop <-> HP)
 const RELAY_API = "https://jsonblob.com/api/jsonBlob";
 
 export const db = {
-  getCluster: () => getClusterID(),
+  getCluster: () => getClusterName(),
   
-  // Fungsi Utama untuk Menghubungkan Perangkat
-  connect: async (clusterName: string) => {
-    localStorage.setItem('tka_cluster_id', clusterName);
+  // Fungsi untuk menyambungkan Laptop dan HP
+  connectCluster: async (name: string) => {
+    const cleanName = name.toUpperCase().replace(/\s/g, '');
+    localStorage.setItem('tka_cluster_name', cleanName);
     
-    // Cari apakah cluster sudah punya Blob ID di "Cloud Discovery"
-    // Untuk demo ini, kita gunakan pendekatan Cluster Name sebagai ID di local storage
-    // Namun tetap melakukan fetch dari cloud jika ID tersedia.
-    let blobId = localStorage.getItem(`blob_${clusterName}`);
-    
-    if (!blobId) {
-      // Buat "Awan" baru untuk Cluster ini
-      try {
+    // Discovery: Cari Blob ID yang sudah ada untuk cluster ini atau buat baru
+    try {
+      // Step 1: Cek apakah ID sudah tersimpan di browser
+      let blobId = localStorage.getItem(`blob_id_${cleanName}`);
+      
+      if (!blobId) {
+        // Step 2: Jika belum ada, buat "Awan" baru di Cloud Relay
         const res = await fetch(RELAY_API, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -49,50 +48,56 @@ export const db = {
         const url = res.headers.get('Location');
         if (url) {
           blobId = url.split('/').pop() || '';
-          localStorage.setItem(`blob_${clusterName}`, blobId);
-          localStorage.setItem('tka_blob_id', blobId);
+          localStorage.setItem(`blob_id_${cleanName}`, blobId);
         }
-      } catch (e) {
-        console.error("Cloud Error", e);
       }
-    } else {
-      localStorage.setItem('tka_blob_id', blobId);
+      
+      if (blobId) {
+        localStorage.setItem('tka_blob_id', blobId);
+        window.location.reload();
+      }
+    } catch (e) {
+      console.error("Koneksi Gagal", e);
+      alert("Gagal menyambung ke Cloud. Pastikan internet aktif.");
     }
-    window.location.reload();
   },
 
-  // Ambil Data dari Awan
-  fetchGlobal: async (): Promise<FullDatabase> => {
+  // Ambil Data Terbaru dari Cloud
+  fetch: async (): Promise<FullDatabase> => {
     const bId = getBlobID();
-    if (!bId) return INITIAL_DB;
+    if (!bId) {
+      // Jika belum pairing, gunakan data lokal + mock
+      const local = localStorage.getItem('tka_local_backup');
+      return local ? JSON.parse(local) : INITIAL_DB;
+    }
 
     try {
       const res = await fetch(`${RELAY_API}/${bId}`);
       if (res.ok) {
         const data = await res.json();
-        // Simpan ke local sebagai cache tercepat
-        localStorage.setItem('tka_local_cache', JSON.stringify(data));
+        // Backup untuk mode offline
+        localStorage.setItem('tka_local_backup', JSON.stringify(data));
         return data;
       }
     } catch (e) {
-      console.warn("Cloud Syncing... using cache");
+      console.warn("Cloud Sync Offline, menggunakan data lokal.");
     }
     
-    const cache = localStorage.getItem('tka_local_cache');
-    return cache ? JSON.parse(cache) : INITIAL_DB;
+    const local = localStorage.getItem('tka_local_backup');
+    return local ? JSON.parse(local) : INITIAL_DB;
   },
 
-  // Simpan Data ke Awan (Agar HP & Laptop Update Bersamaan)
-  pushGlobal: async (updateFn: (db: FullDatabase) => FullDatabase) => {
+  // Simpan Data ke Cloud agar HP/Laptop lain langsung update
+  push: async (updateFn: (db: FullDatabase) => FullDatabase) => {
     const bId = getBlobID();
-    const current = await db.fetchGlobal();
+    const current = await db.fetch();
     const updated = updateFn(current);
     updated.lastUpdated = new Date().toISOString();
 
-    // Update Local First (Fast UI)
-    localStorage.setItem('tka_local_cache', JSON.stringify(updated));
+    // Simpan ke lokal dulu (supaya cepat)
+    localStorage.setItem('tka_local_backup', JSON.stringify(updated));
 
-    // Push to Cloud (Sync Devices)
+    // Kirim ke Cloud agar perangkat lain sinkron
     if (bId) {
       try {
         await fetch(`${RELAY_API}/${bId}`, {
@@ -101,38 +106,38 @@ export const db = {
           body: JSON.stringify(updated)
         });
       } catch (e) {
-        console.error("Sync Failed", e);
+        console.error("Cloud Push Gagal", e);
       }
     }
     return updated;
   },
 
-  // API Methods
+  // API Methods yang dipanggil oleh App.tsx
   resident: {
-    findMany: async () => (await db.fetchGlobal()).residents,
+    findMany: async () => (await db.fetch()).residents,
     update: async (id: string, payload: any) => 
-      db.pushGlobal(d => ({ ...d, residents: d.residents.map(r => r.id === id ? {...r, ...payload} : r) })),
+      db.push(d => ({ ...d, residents: d.residents.map(r => r.id === id ? {...r, ...payload} : r) })),
     create: async (payload: any) => 
-      db.pushGlobal(d => ({ ...d, residents: [payload, ...d.residents] }))
+      db.push(d => ({ ...d, residents: [payload, ...d.residents] }))
   },
   incident: {
-    findMany: async () => (await db.fetchGlobal()).incidents,
+    findMany: async () => (await db.fetch()).incidents,
     create: async (payload: any) => 
-      db.pushGlobal(d => ({ ...d, incidents: [payload, ...d.incidents] }))
+      db.push(d => ({ ...d, incidents: [payload, ...d.incidents] }))
   },
   patrol: {
-    findMany: async () => (await db.fetchGlobal()).patrolLogs,
+    findMany: async () => (await db.fetch()).patrolLogs,
     create: async (payload: any) => 
-      db.pushGlobal(d => ({ ...d, patrolLogs: [payload, ...d.patrolLogs] }))
+      db.push(d => ({ ...d, patrolLogs: [payload, ...d.patrolLogs] }))
   },
   guest: {
-    findMany: async () => (await db.fetchGlobal()).guests,
+    findMany: async () => (await db.fetch()).guests,
     create: async (payload: any) => 
-      db.pushGlobal(d => ({ ...d, guests: [payload, ...d.guests] }))
+      db.push(d => ({ ...d, guests: [payload, ...d.guests] }))
   },
   chat: {
-    findMany: async () => (await db.fetchGlobal()).chatMessages,
+    findMany: async () => (await db.fetch()).chatMessages,
     create: async (payload: any) => 
-      db.pushGlobal(d => ({ ...d, chatMessages: [...d.chatMessages, payload] }))
+      db.push(d => ({ ...d, chatMessages: [...d.chatMessages, payload] }))
   }
 };

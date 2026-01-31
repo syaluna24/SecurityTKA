@@ -13,15 +13,17 @@ import { User, PatrolLog, IncidentReport, Resident, GuestLog, ChatMessage, UserR
 import Layout from './components/Layout.tsx';
 import { 
   Shield, Search, Send, Users, MapPin, X, AlertTriangle, 
-  UserPlus, ArrowRight, CheckCircle, Edit2, Plus, Home, 
-  Activity, MessageSquare, Radio, LogOut, Camera, Trash2, UserCheck, RefreshCw, Ghost, PhoneCall, ArrowLeftRight, ClipboardCheck, BookOpen, Settings, Clock, Wifi, Globe, Link, Cpu
+  ArrowRight, CheckCircle, Edit2, Plus, Home, 
+  Activity, MessageSquare, Radio, LogOut, Camera, Trash2, UserCheck, RefreshCw, Ghost, PhoneCall, ArrowLeftRight, ClipboardCheck, BookOpen, Globe, Wifi, Link, Cpu,
+  // Fix: Added missing Clock import
+  Clock
 } from 'lucide-react';
 import { getSecurityBriefing } from './services/geminiService.ts';
 import { BarChart, Bar, Tooltip, ResponsiveContainer, Cell, XAxis } from 'recharts';
 import { db } from './lib/db.ts';
 
 const App: React.FC = () => {
-  // --- DATABASE STATES ---
+  // --- DATABASE STATES (Initial with Mocks to prevent blank screen) ---
   const [residents, setResidents] = useState<Resident[]>(MOCK_RESIDENTS);
   const [patrolLogs, setPatrolLogs] = useState<PatrolLog[]>([]);
   const [incidents, setIncidents] = useState<IncidentReport[]>(MOCK_INCIDENTS);
@@ -39,11 +41,11 @@ const App: React.FC = () => {
   const [loginError, setLoginError] = useState('');
   const [chatInput, setChatInput] = useState('');
   const [syncStatus, setSyncStatus] = useState<'IDLE' | 'SYNCING' | 'CONNECTED'>('CONNECTED');
-  const [lastSyncTime, setLastSyncTime] = useState<string>('Baru saja');
+  const [lastUpdate, setLastUpdate] = useState<string>('Baru saja');
   const [isModalOpen, setIsModalOpen] = useState<'RESIDENT' | 'GUEST' | 'INCIDENT' | 'PATROL_REPORT' | 'PAIRING' | null>(null);
   const [editingItem, setEditingItem] = useState<any>(null);
   const [securityBriefing, setSecurityBriefing] = useState<string>('');
-  const [pairingCode, setPairingCode] = useState(db.getCluster());
+  const [pairingInput, setPairingInput] = useState(db.getCluster());
 
   // --- FORM STATES ---
   const [resForm, setResForm] = useState<Partial<Resident>>({ name: '', houseNumber: '', block: BLOCKS[0], phoneNumber: '', isHome: true });
@@ -55,28 +57,28 @@ const App: React.FC = () => {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- GLOBAL SYNC ENGINE ( Laptop <-> Handphone ) ---
-  const syncGlobalData = async (silent = true) => {
+  // --- SINKRONISASI GLOBAL (Laptop <-> HP) ---
+  const refreshData = async (silent = true) => {
     if (!silent) setSyncStatus('SYNCING');
     try {
-      const globalDb = await db.fetchGlobal();
-      setResidents(globalDb.residents);
-      setPatrolLogs(globalDb.patrolLogs);
-      setIncidents(globalDb.incidents);
-      setGuests(globalDb.guests);
-      setChatMessages(globalDb.chatMessages);
+      const data = await db.fetch();
+      setResidents(data.residents);
+      setPatrolLogs(data.patrolLogs);
+      setIncidents(data.incidents);
+      setGuests(data.guests);
+      setChatMessages(data.chatMessages);
       
       setSyncStatus('CONNECTED');
-      setLastSyncTime(new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'}));
+      setLastUpdate(new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}));
     } catch (e) {
-      console.error("Sync Failed", e);
+      console.error("Sync Gagal", e);
     }
   };
 
   useEffect(() => {
-    syncGlobalData(false);
-    // Interval sinkronisasi sangat cepat (3 detik) agar terasa real-time antara Laptop & HP
-    const interval = setInterval(() => syncGlobalData(true), 3000);
+    refreshData(false);
+    // Polling setiap 3 detik untuk sinkronisasi antar perangkat secara instan
+    const interval = setInterval(() => refreshData(true), 3000);
     return () => clearInterval(interval);
   }, []);
 
@@ -89,8 +91,8 @@ const App: React.FC = () => {
   }, [currentUser]);
 
   useEffect(() => {
-    if (activeTab === 'chat') {
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (activeTab === 'chat' && chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [chatMessages, activeTab]);
 
@@ -103,14 +105,14 @@ const App: React.FC = () => {
     if (isValid) {
       setCurrentUser({ ...selectedUser, role: loginTab as UserRole });
     } else {
-      setLoginError('PIN Salah. Satpam: 1234, Admin: admin123');
+      setLoginError('PIN: 1234 (Satpam) / admin123 (Admin)');
     }
   };
 
-  const handleConnect = async (e: React.FormEvent) => {
+  const handlePairing = async (e: React.FormEvent) => {
     e.preventDefault();
     setSyncStatus('SYNCING');
-    await db.connect(pairingCode);
+    await db.connectCluster(pairingInput);
     setIsModalOpen(null);
   };
 
@@ -120,7 +122,7 @@ const App: React.FC = () => {
     if (editingItem) await db.resident.update(id, resForm);
     else await db.resident.create({ ...resForm, id });
     setIsModalOpen(null);
-    syncGlobalData();
+    refreshData();
   };
 
   const handleSaveGuest = async (e: React.FormEvent) => {
@@ -134,7 +136,7 @@ const App: React.FC = () => {
       status: 'IN'
     });
     setIsModalOpen(null);
-    syncGlobalData();
+    refreshData();
   };
 
   const handleSaveIncident = async (e: React.FormEvent) => {
@@ -148,7 +150,7 @@ const App: React.FC = () => {
       status: 'PENDING'
     });
     setIsModalOpen(null);
-    syncGlobalData();
+    refreshData();
   };
 
   const handlePatrolReport = async (e: React.FormEvent) => {
@@ -164,12 +166,12 @@ const App: React.FC = () => {
       photo: patrolReportData.photo
     });
     setIsModalOpen(null);
-    syncGlobalData();
+    refreshData();
   };
 
   const handleStatusChange = async (id: string, isHome: boolean) => {
     await db.resident.update(id, { isHome });
-    syncGlobalData();
+    refreshData();
   };
 
   const handleSendChat = async (e: React.FormEvent) => {
@@ -185,17 +187,17 @@ const App: React.FC = () => {
     };
     await db.chat.create(msg);
     setChatInput('');
-    syncGlobalData();
+    refreshData();
   };
 
-  // --- UI VIEWS ---
+  // --- DATA AGGREGATION ---
   const timelineFeed = useMemo(() => {
     const combined = [
       ...patrolLogs.map(p => ({ ...p, type: 'PATROL', time: p.timestamp, title: `Patroli: ${p.checkpoint}`, color: 'slate' })),
       ...incidents.map(i => ({ ...i, type: 'INCIDENT', time: i.timestamp, title: `Insiden: ${i.type}`, color: 'red' })),
       ...guests.map(g => ({ ...g, type: 'GUEST', time: g.entryTime, title: `Tamu: ${g.name}`, color: 'blue' }))
     ];
-    return combined.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 25);
+    return combined.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 30);
   }, [patrolLogs, incidents, guests]);
 
   if (!currentUser) {
@@ -204,27 +206,28 @@ const App: React.FC = () => {
 
     return (
       <div className="min-h-screen bg-[#0F172A] flex items-center justify-center p-4">
-        <div className="bg-white w-full max-w-[900px] flex flex-col md:flex-row rounded-[3rem] shadow-2xl overflow-hidden animate-slide-up border border-white/10">
-          <div className="w-full md:w-5/12 bg-slate-900 p-8 lg:p-12 text-white flex flex-col justify-between relative overflow-hidden">
-            <div className="absolute -top-24 -right-24 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl"></div>
+        <div className="bg-white w-full max-w-[900px] flex flex-col md:flex-row rounded-[3rem] shadow-2xl overflow-hidden animate-slide-up border border-white/5">
+          <div className="w-full md:w-5/12 bg-slate-900 p-8 lg:p-12 text-white flex flex-col justify-between relative">
+            <div className="absolute -top-32 -right-32 w-80 h-80 bg-amber-500/10 rounded-full blur-3xl"></div>
             <div className="relative z-10">
-              <div className="bg-amber-500 w-16 h-16 rounded-3xl flex items-center justify-center mb-10 shadow-2xl">
+              <div className="bg-amber-500 w-16 h-16 rounded-3xl flex items-center justify-center mb-10 shadow-2xl shadow-amber-500/20">
                 <Shield size={32} className="text-slate-900" />
               </div>
-              <h1 className="text-3xl lg:text-4xl font-black mb-4 tracking-tighter italic uppercase leading-none">TKA SECURE <br/><span className="text-amber-500 not-italic text-2xl font-light tracking-widest leading-none">Global Sync</span></h1>
-              <p className="text-slate-400 text-sm italic leading-relaxed font-medium">Sistem Terintegrasi Nyata. Hubungkan Laptop & HP Anda dengan kode Cluster yang sama.</p>
+              <h1 className="text-3xl lg:text-4xl font-black mb-4 tracking-tighter italic uppercase leading-none">TKA SECURE <br/><span className="text-amber-500 not-italic text-2xl font-light tracking-widest leading-none">Vercel Bridge</span></h1>
+              <p className="text-slate-400 text-sm italic leading-relaxed font-medium">Data tersinkronisasi otomatis antar Laptop dan HP melalui Cloud Pairing.</p>
             </div>
-            <div className="p-5 bg-white/5 rounded-2xl border border-white/10 relative z-10 backdrop-blur-sm">
+            <div className="p-5 bg-white/5 rounded-2xl border border-white/10 relative z-10 backdrop-blur-md">
                <div className="flex items-center gap-3 mb-2">
                   <Globe size={16} className="text-amber-500" />
-                  <span className="text-[10px] font-black uppercase text-slate-300 tracking-widest leading-none">Cloud Pairing Active</span>
+                  <span className="text-[10px] font-black uppercase text-slate-300 tracking-widest leading-none">Connected Cluster</span>
                </div>
-               <p className="text-xs font-black text-white italic">{db.getCluster()}</p>
+               <p className="text-xs font-black text-white italic truncate">{db.getCluster()}</p>
+               <button onClick={() => setIsModalOpen('PAIRING')} className="mt-3 text-[9px] font-black text-amber-500 uppercase tracking-widest flex items-center gap-2 hover:underline"><RefreshCw size={12}/> Ganti Cluster</button>
             </div>
           </div>
 
-          <div className="w-full md:w-7/12 p-8 lg:p-14 flex flex-col bg-white overflow-y-auto max-h-[850px]">
-            <h2 className="text-2xl font-black text-slate-900 mb-8 uppercase italic leading-none">Portal Akses</h2>
+          <div className="w-full md:w-7/12 p-8 lg:p-14 flex flex-col bg-white overflow-y-auto max-h-[850px] no-scrollbar">
+            <h2 className="text-2xl font-black text-slate-900 mb-8 uppercase italic leading-none">Portal Login</h2>
             <div className="flex bg-slate-100 p-1 rounded-2xl mb-8">
               {(['SECURITY', 'ADMIN', 'RESIDENT'] as const).map(t => (
                 <button key={t} onClick={() => { setLoginTab(t); setSelectedUser(null); }}
@@ -235,26 +238,26 @@ const App: React.FC = () => {
             </div>
             <div className="relative mb-6">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-              <input type="text" placeholder={`Cari nama...`}
+              <input type="text" placeholder={`Cari nama ${loginTab.toLowerCase()}...`}
                 className="w-full pl-12 pr-6 py-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-amber-500 outline-none font-bold text-sm shadow-inner transition-all"
                 value={loginSearch} onChange={e => setLoginSearch(e.target.value)} />
             </div>
             <div className="flex-1 overflow-y-auto mb-6 space-y-2 no-scrollbar min-h-[250px]">
               {filtered.map((u: any) => (
-                <button key={u.id} type="button" onClick={() => { setSelectedUser(u); setLoginError(''); }}
+                <button key={u.id} onClick={() => { setSelectedUser(u); setLoginError(''); }}
                   className={`w-full flex items-center gap-4 p-4 rounded-2xl border-2 transition-all duration-300 ${selectedUser?.id === u.id ? 'border-amber-500 bg-amber-50 shadow-lg' : 'border-transparent bg-slate-50 hover:bg-slate-100'}`}>
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black ${selectedUser?.id === u.id ? 'bg-amber-500 text-slate-900' : 'bg-slate-900 text-white'}`}>{u.name.charAt(0)}</div>
                   <div className="flex-1 text-left">
                     <p className="font-black text-slate-900 text-sm truncate uppercase leading-none mb-1">{u.name}</p>
-                    <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{u.sub || 'Authorized'}</p>
+                    <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{u.sub || 'Access Authorized'}</p>
                   </div>
                 </button>
               ))}
             </div>
             {selectedUser && (
               <form onSubmit={handleLogin} className="pt-6 border-t border-slate-100 space-y-4 animate-slide-up">
-                <input type="password" required placeholder="PIN (4 DIGIT)"
-                  className="w-full px-8 py-4 rounded-2xl bg-slate-50 border-2 border-slate-100 focus:border-amber-500 outline-none font-black text-xl tracking-[0.5em] text-center" 
+                <input type="password" required placeholder="PIN"
+                  className="w-full px-8 py-4 rounded-2xl bg-slate-50 border-2 border-slate-100 focus:border-amber-500 outline-none font-black text-2xl tracking-[0.5em] text-center" 
                   value={passwordInput} onChange={e => setPasswordInput(e.target.value)} />
                 {loginError && <p className="text-red-500 text-[10px] font-black text-center uppercase italic">{loginError}</p>}
                 <button type="submit" className="w-full bg-slate-900 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-4 text-[10px] uppercase tracking-widest shadow-2xl hover:bg-slate-800 transition-all">
@@ -262,22 +265,21 @@ const App: React.FC = () => {
                 </button>
               </form>
             )}
-            <button onClick={() => setIsModalOpen('PAIRING')} className="mt-6 text-[10px] font-black text-amber-600 uppercase tracking-widest hover:underline flex items-center justify-center gap-2"><Wifi size={14}/> SINKRONISASI CLUSTER</button>
           </div>
         </div>
 
         {/* Modal Pairing */}
         {isModalOpen === 'PAIRING' && (
            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md">
-              <div className="bg-white w-full max-w-md rounded-[2.5rem] p-10 animate-slide-up border border-white/20">
-                 <h3 className="text-xl font-black text-slate-900 mb-2 uppercase italic leading-none">Sinkron Laptop & HP</h3>
-                 <p className="text-sm text-slate-500 mb-8 font-medium">Masukkan Nama Perumahan yang sama di HP dan Laptop Anda.</p>
-                 <form onSubmit={handleConnect} className="space-y-6">
+              <div className="bg-white w-full max-w-md rounded-[2.5rem] p-10 animate-slide-up">
+                 <h3 className="text-xl font-black text-slate-900 mb-2 uppercase italic leading-none">Cloud Pairing</h3>
+                 <p className="text-sm text-slate-500 mb-8 font-medium">Masukkan Nama Cluster (misal: PERUM-TKA-1) di Laptop & HP Anda untuk sinkronisasi.</p>
+                 <form onSubmit={handlePairing} className="space-y-6">
                     <input type="text" required className="w-full p-5 rounded-2xl bg-slate-50 border-2 border-slate-100 font-black text-center text-lg focus:border-amber-500 outline-none" 
-                      value={pairingCode} onChange={e => setPairingCode(e.target.value.toUpperCase().replace(/\s/g, ''))} placeholder="MISAL: TKA-SHIFT-1" />
-                    <button type="submit" className="w-full bg-amber-500 text-slate-900 font-black py-5 rounded-2xl uppercase text-[10px] tracking-widest shadow-xl active:scale-95 transition-all">SAMBUNGKAN SEKARANG</button>
+                      value={pairingInput} onChange={e => setPairingInput(e.target.value.toUpperCase().replace(/\s/g, ''))} placeholder="NAMA CLUSTER" />
+                    <button type="submit" className="w-full bg-amber-500 text-slate-900 font-black py-5 rounded-2xl uppercase text-[10px] tracking-widest shadow-xl">HUBUNGKAN PERANGKAT</button>
+                    <button type="button" onClick={() => setIsModalOpen(null)} className="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">BATAL</button>
                  </form>
-                 <button onClick={() => setIsModalOpen(null)} className="w-full mt-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">BATAL</button>
               </div>
            </div>
         )}
@@ -291,42 +293,39 @@ const App: React.FC = () => {
       {/* 1. DASHBOARD */}
       {activeTab === 'dashboard' && (
         <div className="space-y-8 animate-slide-up pb-10">
-          {/* Cloud Sync Status Visualization */}
-          <div className="bg-white p-6 lg:p-10 rounded-[3rem] shadow-sm border border-slate-100 flex flex-col lg:flex-row items-center justify-between gap-8 relative overflow-hidden group">
-             <div className="absolute top-0 right-0 w-48 h-48 bg-amber-500/5 rounded-full blur-3xl group-hover:bg-amber-500/10 transition-all"></div>
+          {/* Cloud Sync Center Status */}
+          <div className="bg-white p-6 lg:p-10 rounded-[3rem] shadow-sm border border-slate-100 flex flex-col lg:flex-row items-center justify-between gap-8 relative overflow-hidden">
+             <div className="absolute top-0 right-0 w-48 h-48 bg-amber-500/5 rounded-full blur-3xl"></div>
              <div className="flex items-center gap-6 relative z-10 w-full lg:w-auto">
                 <div className={`w-16 h-16 rounded-[1.8rem] flex items-center justify-center shadow-2xl transition-all duration-700 ${syncStatus === 'SYNCING' ? 'bg-slate-200 animate-spin' : 'bg-slate-900 shadow-slate-900/20'}`}>
                    <Globe size={32} className={`${syncStatus === 'SYNCING' ? 'text-slate-400' : 'text-amber-500 animate-pulse'}`} />
                 </div>
                 <div>
-                   <h3 className="text-xl font-black text-slate-900 uppercase italic leading-none mb-2">Global Cloud Bridge</h3>
+                   <h3 className="text-xl font-black text-slate-900 uppercase italic leading-none mb-2">Cluster Sync Hub</h3>
                    <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full ${syncStatus === 'CONNECTED' ? 'bg-green-500 animate-ping' : 'bg-amber-500'}`}></span>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">{syncStatus === 'CONNECTED' ? `${db.getCluster()} • TERSAMBUNG` : 'SINKRONISASI...'}</p>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">{db.getCluster()} • ONLINE</p>
                    </div>
                 </div>
              </div>
              <div className="flex items-center gap-8 w-full lg:w-auto justify-end relative z-10">
                 <div className="text-right">
                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Update Terakhir</p>
-                   <p className="text-slate-900 font-black text-sm italic tabular-nums">{lastSyncTime}</p>
+                   <p className="text-slate-900 font-black text-sm italic tabular-nums">{lastUpdate}</p>
                 </div>
                 <div className="h-10 w-px bg-slate-100 hidden lg:block"></div>
-                <button onClick={() => syncGlobalData(false)} className="p-4 bg-slate-50 text-slate-900 rounded-2xl hover:bg-amber-500 transition-all active:scale-90 shadow-inner">
-                   <RefreshCw size={20} className={syncStatus === 'SYNCING' ? 'animate-spin' : ''}/>
-                </button>
                 <button onClick={() => setIsModalOpen('PAIRING')} className="px-6 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl flex items-center gap-3 active:scale-95 transition-all">
-                   <Link size={16}/> PAIRING HP
+                   <Wifi size={16}/> SINKRON HP
                 </button>
              </div>
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
             {[
-              { label: 'Security Shift', val: staff.length, icon: <UserCheck size={24}/>, color: 'blue' },
-              { label: 'Insiden Open', val: incidents.filter(i => i.status !== 'RESOLVED').length, icon: <AlertTriangle size={24}/>, color: 'red' },
-              { label: 'Tamu Masuk', val: guests.filter(g => g.status === 'IN').length, icon: <Users size={24}/>, color: 'amber' },
-              { label: 'Data Unit', val: residents.length, icon: <Home size={24}/>, color: 'green' }
+              { label: 'Security Aktif', val: staff.length, icon: <UserCheck size={24}/>, color: 'blue' },
+              { label: 'Insiden Terbuka', val: incidents.filter(i => i.status !== 'RESOLVED').length, icon: <AlertTriangle size={24}/>, color: 'red' },
+              { label: 'Tamu Hari Ini', val: guests.filter(g => g.status === 'IN').length, icon: <Users size={24}/>, color: 'amber' },
+              { label: 'Total Unit', val: residents.length, icon: <Home size={24}/>, color: 'green' }
             ].map((s, i) => (
               <div key={i} className="bg-white p-6 lg:p-8 rounded-[2rem] shadow-sm border border-slate-100 hover:shadow-xl transition-all duration-300">
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-6 ${s.color === 'amber' ? 'bg-amber-50 text-amber-600' : s.color === 'red' ? 'bg-red-50 text-red-600' : s.color === 'blue' ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600'}`}>
@@ -340,7 +339,7 @@ const App: React.FC = () => {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
              <div className="lg:col-span-2 bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 min-h-[400px]">
-                <h3 className="text-lg font-black text-slate-900 mb-10 uppercase italic flex items-center gap-4"><Activity className="text-amber-500 animate-pulse"/> Statistik Aktivitas Nyata</h3>
+                <h3 className="text-lg font-black text-slate-900 mb-10 uppercase italic flex items-center gap-4"><Activity className="text-amber-500 animate-pulse"/> Statistik Keamanan Real-time</h3>
                 <div className="h-[300px] w-full">
                    <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={[{name: 'Patroli', val: patrolLogs.length}, {name: 'Tamu', val: guests.length}, {name: 'Lapor', val: incidents.length}]}>
@@ -361,16 +360,16 @@ const App: React.FC = () => {
                    <h3 className="text-2xl font-black uppercase italic mb-4 tracking-tighter">AI Security Briefing</h3>
                    <p className="text-slate-400 text-sm italic leading-relaxed font-medium">"{securityBriefing}"</p>
                 </div>
-                <button onClick={() => setActiveTab('chat')} className="w-full bg-white text-slate-900 font-black py-5 rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition-all mt-10 shadow-xl">KOORDINASI TIM <ArrowRight size={18} className="inline ml-2"/></button>
+                <button onClick={() => setActiveTab('chat')} className="w-full bg-white text-slate-900 font-black py-5 rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition-all mt-10 shadow-xl">HUBUNGI TIM <ArrowRight size={18} className="inline ml-2"/></button>
              </div>
           </div>
         </div>
       )}
 
-      {/* 2. CEK UNIT */}
+      {/* 2. CEK UNIT (STATUS WARGA) */}
       {activeTab === 'log_resident' && (
         <div className="space-y-8 animate-slide-up pb-24">
-           <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Status Hunian Real-time</h3>
+           <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Monitoring Unit Warga</h3>
            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               {residents.map(res => (
                 <div key={res.id} className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col justify-between group hover:shadow-xl transition-all duration-300">
@@ -383,7 +382,7 @@ const App: React.FC = () => {
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Unit: {res.block}-{res.houseNumber}</p>
                    </div>
                    <button onClick={() => handleStatusChange(res.id, !res.isHome)} className={`w-full mt-6 py-4 rounded-[1.5rem] font-black text-[10px] uppercase flex items-center justify-center gap-3 active:scale-95 transition-all shadow-lg ${res.isHome ? 'bg-slate-900 text-white' : 'bg-green-500 text-white'}`}>
-                      {res.isHome ? <ArrowLeftRight size={18}/> : <CheckCircle size={18}/>} {res.isHome ? 'CATAT KELUAR' : 'KONFIRMASI MASUK'}
+                      {res.isHome ? <ArrowLeftRight size={18}/> : <CheckCircle size={18}/>} {res.isHome ? 'KONFIRMASI KELUAR' : 'KONFIRMASI MASUK'}
                    </button>
                 </div>
               ))}
@@ -394,7 +393,7 @@ const App: React.FC = () => {
       {/* 3. PATROLI */}
       {activeTab === 'patrol' && (
         <div className="space-y-8 animate-slide-up pb-20">
-           <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Digital Checkpoints Control</h3>
+           <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Kontrol Checkpoints Patroli</h3>
            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
               {INITIAL_CHECKPOINTS.map((cp, idx) => {
                 const last = patrolLogs.find(l => l.checkpoint === cp);
@@ -409,11 +408,11 @@ const App: React.FC = () => {
                     </div>
                     {currentUser.role === 'SECURITY' ? (
                       <div className="grid grid-cols-2 gap-4">
-                        <button onClick={() => { setPatrolAction({cp, status: 'OK'}); setIsModalOpen('PATROL_REPORT'); }} className="py-5 bg-green-500 text-white rounded-2xl font-black text-[10px] uppercase shadow-lg shadow-green-500/10 active:scale-95">AMAN</button>
-                        <button onClick={() => { setPatrolAction({cp, status: 'DANGER'}); setIsModalOpen('PATROL_REPORT'); }} className="py-5 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase shadow-lg shadow-red-500/10 active:scale-95">BAHAYA</button>
+                        <button onClick={() => { setPatrolAction({cp, status: 'OK'}); setIsModalOpen('PATROL_REPORT'); }} className="py-5 bg-green-500 text-white rounded-2xl font-black text-[10px] uppercase shadow-lg active:scale-95">AMAN</button>
+                        <button onClick={() => { setPatrolAction({cp, status: 'DANGER'}); setIsModalOpen('PATROL_REPORT'); }} className="py-5 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase shadow-lg active:scale-95">BAHAYA</button>
                       </div>
                     ) : (
-                      <div className="text-[10px] font-black text-slate-400 uppercase border-t pt-6 tracking-widest italic truncate leading-none">Terakhir: {last ? `${last.securityName} (${new Date(last.timestamp).toLocaleTimeString()})` : 'Belum Ada Log Cloud'}</div>
+                      <div className="text-[10px] font-black text-slate-400 uppercase border-t pt-6 tracking-widest italic truncate leading-none">Log Terakhir: {last ? `${last.securityName} (${new Date(last.timestamp).toLocaleTimeString()})` : 'Belum Ada Laporan'}</div>
                     )}
                   </div>
                 );
@@ -422,10 +421,10 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* 4. FEED AKTIVITAS (TIMELINE GLOBAL) */}
+      {/* 4. FEED AKTIVITAS (TIMELINE) */}
       {activeTab === 'reports' && (
         <div className="space-y-8 animate-slide-up pb-20">
-           <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Global Activity Timeline</h3>
+           <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Global Activity Feed</h3>
            <div className="bg-white p-6 lg:p-12 rounded-[3.5rem] shadow-sm border border-slate-100">
               <div className="space-y-12">
                 {timelineFeed.length > 0 ? timelineFeed.map((item: any, idx) => (
@@ -446,8 +445,8 @@ const App: React.FC = () => {
                         </p>
                         {item.photo && <img src={item.photo} alt="Visual Proof" className="mb-6 rounded-[2rem] w-full max-w-md border border-slate-100 shadow-xl" />}
                         <div className="flex flex-wrap gap-3">
-                           <span className={`px-4 py-2 rounded-full text-[9px] font-black uppercase tracking-widest ${item.status === 'OK' || item.status === 'RESOLVED' || item.status === 'IN' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>{item.status || 'VERIFIED'}</span>
-                           <span className="px-4 py-2 bg-slate-50 text-slate-400 rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-2"><Clock size={12}/> Oleh: {item.securityName || item.reporterName || 'Sistem Cloud'}</span>
+                           <span className={`px-4 py-2 rounded-full text-[9px] font-black uppercase tracking-widest ${item.status === 'OK' || item.status === 'RESOLVED' || item.status === 'IN' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>{item.status || 'TERCATAT'}</span>
+                           <span className="px-4 py-2 bg-slate-50 text-slate-400 rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-2"><Clock size={12}/> Oleh: {item.securityName || item.reporterName || 'Sistem'}</span>
                         </div>
                      </div>
                   </div>
@@ -466,7 +465,7 @@ const App: React.FC = () => {
       {activeTab === 'guests' && (
         <div className="space-y-8 animate-slide-up pb-24">
            <div className="flex justify-between items-center">
-              <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Buku Tamu Cloud</h3>
+              <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Buku Tamu Digital</h3>
               <button onClick={() => setIsModalOpen('GUEST')} className="bg-blue-600 text-white p-4 rounded-2xl shadow-xl active:scale-95 transition-all"><Plus size={24}/></button>
            </div>
            <div className="bg-white rounded-[3rem] overflow-hidden border border-slate-100 shadow-sm">
@@ -478,11 +477,11 @@ const App: React.FC = () => {
                           <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Tujuan Unit</th>
                           <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Keperluan</th>
                           <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Status</th>
-                          <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Check-In</th>
+                          <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Entry</th>
                        </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                       {guests.map(g => (
+                       {guests.length > 0 ? guests.map(g => (
                           <tr key={g.id} className="hover:bg-slate-50 transition-colors">
                              <td className="px-8 py-6 font-black text-slate-900 uppercase italic">{g.name}</td>
                              <td className="px-8 py-6 text-sm text-slate-500 font-medium">{g.visitToName}</td>
@@ -492,7 +491,9 @@ const App: React.FC = () => {
                              </td>
                              <td className="px-8 py-6 text-[10px] font-black text-slate-300 tabular-nums">{new Date(g.entryTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</td>
                           </tr>
-                       ))}
+                       )) : (
+                          <tr><td colSpan={5} className="p-20 text-center text-slate-400 italic">Belum Ada Tamu Terdaftar</td></tr>
+                       )}
                     </tbody>
                  </table>
               </div>
@@ -504,7 +505,7 @@ const App: React.FC = () => {
       {activeTab === 'incident' && (
         <div className="space-y-8 animate-slide-up pb-24">
            <div className="flex justify-between items-center">
-              <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Pelaporan Insiden</h3>
+              <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Laporan Insiden</h3>
               <button onClick={() => setIsModalOpen('INCIDENT')} className="bg-red-600 text-white p-4 rounded-2xl shadow-xl active:scale-95 transition-all"><Plus size={24}/></button>
            </div>
            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -528,11 +529,11 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* 7. WARGA */}
+      {/* 7. WARGA (MASTER DATABASE) */}
       {activeTab === 'residents' && (
         <div className="space-y-8 animate-slide-up pb-24">
            <div className="flex justify-between items-center">
-              <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Master Database Unit</h3>
+              <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Database Master Warga</h3>
               {currentUser.role === 'ADMIN' && (
                 <button onClick={() => { setEditingItem(null); setResForm({ name: '', houseNumber: '', block: BLOCKS[0], phoneNumber: '', isHome: true }); setIsModalOpen('RESIDENT'); }} className="bg-slate-900 text-white p-4 rounded-2xl shadow-xl active:scale-95 transition-all"><Plus size={24}/></button>
               )}
@@ -546,12 +547,12 @@ const App: React.FC = () => {
                         <span className="text-[9px] font-black text-slate-300 uppercase italic opacity-50">SYNC-ID: {res.id.slice(0,5)}</span>
                       </div>
                       <h4 className="font-black text-slate-900 uppercase italic truncate text-lg mb-1 leading-none">{res.name}</h4>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-8 leading-none">Rumah {res.block} No {res.houseNumber}</p>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-8 leading-none">Blok {res.block} No {res.houseNumber}</p>
                    </div>
                    <div className="flex gap-2">
                       <a href={`tel:${res.phoneNumber}`} className="flex-1 py-4 bg-slate-50 text-slate-900 rounded-2xl flex items-center justify-center gap-2 font-black text-[9px] uppercase hover:bg-green-500 hover:text-white transition-all"><PhoneCall size={16}/> HUBUNGI</a>
                       {currentUser.role === 'ADMIN' && (
-                        <button onClick={() => { setEditingItem(res); setResForm(res); setIsModalOpen('RESIDENT'); }} className="p-4 bg-slate-100 text-slate-400 hover:text-blue-500 rounded-2xl transition-all"><Edit2 size={16}/></button>
+                        <button onClick={() => { setEditingItem(res); setResForm(res); setIsModalOpen('RESIDENT'); }} className="p-4 bg-slate-100 text-slate-400 hover:text-blue-500 rounded-2xl transition-all duration-300"><Edit2 size={16}/></button>
                       )}
                    </div>
                 </div>
@@ -560,12 +561,12 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* 8. CHAT & 9. SETTINGS */}
+      {/* 8. CHAT */}
       {activeTab === 'chat' && (
         <div className="max-w-4xl mx-auto h-[calc(100vh-220px)] flex flex-col animate-slide-up pb-10">
            <div className="flex-1 bg-white rounded-t-[3rem] shadow-sm border border-slate-100 overflow-y-auto p-6 lg:p-10 space-y-8 no-scrollbar relative">
               <div className="sticky top-0 z-10 text-center mb-10">
-                 <span className="bg-slate-50 text-slate-400 text-[8px] font-black uppercase px-6 py-2 rounded-full border border-slate-100 tracking-widest italic backdrop-blur-md">Pusat Komunikasi Real-time</span>
+                 <span className="bg-slate-50 text-slate-400 text-[8px] font-black uppercase px-6 py-2 rounded-full border border-slate-100 tracking-widest italic backdrop-blur-md">Pusat Komunikasi Shift</span>
               </div>
               {chatMessages.length > 0 ? chatMessages.map((msg, i) => (
                 <div key={msg.id} className={`flex ${msg.senderId === currentUser.id ? 'justify-end' : 'justify-start'} animate-slide-up`}>
@@ -581,13 +582,13 @@ const App: React.FC = () => {
               )) : (
                  <div className="h-full flex flex-col items-center justify-center opacity-20 grayscale italic">
                     <MessageSquare size={64} className="mb-6" />
-                    <p className="font-black uppercase tracking-[0.4em] text-[10px]">Obrolan Tim Masih Kosong</p>
+                    <p className="font-black uppercase tracking-[0.4em] text-[10px]">Belum Ada Koordinasi Tim</p>
                  </div>
               )}
               <div ref={chatEndRef} />
            </div>
            <form onSubmit={handleSendChat} className="bg-white p-6 rounded-b-[3rem] border-t border-slate-100 flex gap-4 shadow-2xl items-center sticky bottom-0">
-              <input type="text" placeholder="Ketik koordinasi tim..." className="flex-1 px-8 py-5 rounded-[2rem] bg-slate-50 border-2 border-transparent outline-none font-bold text-sm focus:border-amber-500 transition-all shadow-inner" value={chatInput} onChange={e => setChatInput(e.target.value)} />
+              <input type="text" placeholder="Ketik pesan koordinasi..." className="flex-1 px-8 py-5 rounded-[2rem] bg-slate-50 border-2 border-transparent outline-none font-bold text-sm focus:border-amber-500 transition-all shadow-inner" value={chatInput} onChange={e => setChatInput(e.target.value)} />
               <button type="submit" className="bg-slate-900 text-white p-5 rounded-2xl active:scale-95 shadow-2xl hover:bg-slate-800 transition-all"><Send size={26}/></button>
            </form>
         </div>
@@ -595,29 +596,29 @@ const App: React.FC = () => {
 
       {activeTab === 'settings' && (
         <div className="max-w-2xl mx-auto space-y-8 animate-slide-up pb-20">
-           <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Konfigurasi Cloud Bridge</h3>
+           <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Konfigurasi Sistem Cloud</h3>
            <div className="bg-white p-10 lg:p-14 rounded-[4rem] shadow-sm border border-slate-100 text-center relative overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-24 bg-slate-900"></div>
               <div className="relative mt-4">
                  <div className="w-32 h-32 bg-amber-500 text-slate-900 rounded-[3rem] flex items-center justify-center font-black text-5xl mx-auto mb-8 shadow-2xl border-[6px] border-white">{currentUser.name.charAt(0)}</div>
               </div>
               <h3 className="text-3xl font-black text-slate-900 uppercase italic mb-1 leading-none tracking-tight">{currentUser.name}</h3>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-12 italic leading-none">Cluster: {db.getCluster()} • Online</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-12 italic leading-none">Cluster: {db.getCluster()} • Vercel Bridge Active</p>
               <div className="space-y-4">
                  <button onClick={() => setIsModalOpen('PAIRING')} className="w-full py-6 bg-slate-900 text-amber-500 rounded-3xl font-black uppercase text-xs tracking-widest flex items-center justify-center gap-4 active:scale-95 transition-all"><Wifi size={20}/> GANTI CLUSTER (PAIRING HP)</button>
-                 <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-6 bg-slate-100 text-slate-400 rounded-3xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-4 active:scale-95 transition-all"><Trash2 size={20}/> FULL SYSTEM RESET</button>
-                 <button onClick={() => setCurrentUser(null)} className="w-full py-6 bg-red-600 text-white rounded-3xl font-black uppercase text-xs tracking-widest flex items-center justify-center gap-4 active:scale-95 transition-all"><LogOut size={20}/> LOGOUT DARI SISTEM</button>
+                 <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-6 bg-slate-100 text-slate-400 rounded-3xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-4 active:scale-95 transition-all"><Trash2 size={20}/> RESET SISTEM LOKAL</button>
+                 <button onClick={() => setCurrentUser(null)} className="w-full py-6 bg-red-600 text-white rounded-3xl font-black uppercase text-xs tracking-widest flex items-center justify-center gap-4 active:scale-95 transition-all"><LogOut size={20}/> LOGOUT</button>
               </div>
            </div>
         </div>
       )}
 
-      {/* --- ALL MODALS (Enhanced for Cloud Sync) --- */}
+      {/* --- ALL MODALS --- */}
       {isModalOpen === 'GUEST' && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md">
           <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl animate-slide-up overflow-hidden">
             <div className="p-10 bg-blue-600 text-white flex justify-between items-center">
-              <h3 className="text-2xl font-black uppercase italic leading-none">Register Tamu</h3>
+              <h3 className="text-2xl font-black uppercase italic leading-none">Daftar Tamu</h3>
               <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
             </div>
             <form onSubmit={handleSaveGuest} className="p-10 space-y-6">
@@ -627,7 +628,7 @@ const App: React.FC = () => {
                  {residents.map(r => <option key={r.id} value={r.id}>{r.name} ({r.block}-{r.houseNumber})</option>)}
               </select>
               <textarea required placeholder="Keperluan Kunjungan..." className="w-full px-8 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 font-bold outline-none focus:border-blue-600 min-h-[120px]" value={guestForm.purpose} onChange={e => setGuestForm({...guestForm, purpose: e.target.value})} />
-              <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">CHECK-IN (SINKRON CLOUD)</button>
+              <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">CHECK-IN TAMU</button>
             </form>
           </div>
         </div>
@@ -637,7 +638,7 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md">
           <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl animate-slide-up overflow-hidden">
             <div className="p-10 bg-red-600 text-white flex justify-between items-center">
-              <h3 className="text-2xl font-black uppercase italic leading-none">Lapor Insiden</h3>
+              <h3 className="text-2xl font-black uppercase italic leading-none">Lapor Kejadian</h3>
               <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
             </div>
             <form onSubmit={handleSaveIncident} className="p-10 space-y-6">
@@ -645,7 +646,7 @@ const App: React.FC = () => {
                  <option value="Pencurian">Pencurian</option>
                  <option value="Kebakaran">Kebakaran</option>
                  <option value="Keributan">Keributan</option>
-                 <option value="Lainnya">Lainnya</option>
+                 <option value="Kecelakaan">Kecelakaan</option>
               </select>
               <input type="text" required placeholder="Lokasi Kejadian..." className="w-full px-8 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 font-bold outline-none" value={incForm.location} onChange={e => setIncForm({...incForm, location: e.target.value})} />
               <textarea required placeholder="Deskripsi Kejadian..." className="w-full px-8 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 font-bold outline-none min-h-[120px]" value={incForm.description} onChange={e => setIncForm({...incForm, description: e.target.value})} />
@@ -654,7 +655,7 @@ const App: React.FC = () => {
                     <button key={s} type="button" onClick={() => setIncForm({...incForm, severity: s})} className={`flex-1 py-4 rounded-2xl font-black text-[10px] border-2 transition-all ${incForm.severity === s ? 'bg-slate-900 text-white border-slate-900 shadow-xl' : 'bg-white text-slate-400 border-slate-100'}`}>{s}</button>
                  ))}
               </div>
-              <button type="submit" className="w-full py-5 bg-red-600 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">KIRIM KE PUSAT (SINKRON)</button>
+              <button type="submit" className="w-full py-5 bg-red-600 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">KIRIM LAPORAN CLOUD</button>
             </form>
           </div>
         </div>
@@ -672,7 +673,7 @@ const App: React.FC = () => {
             </div>
             <form onSubmit={handlePatrolReport} className="p-8 lg:p-12 space-y-8">
               <div className="space-y-2">
-                 <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1 leading-none">Bukti Visual Petugas:</label>
+                 <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1 leading-none">Bukti Foto Petugas:</label>
                  <div className="flex flex-col gap-4">
                     {patrolReportData.photo ? (
                       <div className="relative group">
@@ -682,7 +683,7 @@ const App: React.FC = () => {
                     ) : (
                       <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full h-48 lg:h-56 rounded-[2rem] bg-slate-50 border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-4 text-slate-400 group hover:border-slate-400 transition-all">
                          <Camera size={48} className="group-hover:scale-110 transition-transform" />
-                         <span className="font-black text-[10px] uppercase tracking-widest italic leading-none">AKTIFKAN KAMERA PETUGAS</span>
+                         <span className="font-black text-[10px] uppercase tracking-widest italic leading-none">AKTIFKAN KAMERA</span>
                       </button>
                     )}
                     <input type="file" ref={fileInputRef} accept="image/*" capture="environment" className="hidden" onChange={(e) => {
@@ -695,7 +696,7 @@ const App: React.FC = () => {
                     }} />
                  </div>
               </div>
-              <textarea required placeholder="Tuliskan catatan kondisi area di lapangan..." className="w-full px-8 py-5 rounded-[1.5rem] bg-slate-50 border-2 border-transparent outline-none font-bold text-sm min-h-[140px] focus:border-slate-900 shadow-inner" value={patrolReportData.note} onChange={e => setPatrolReportData({...patrolReportData, note: e.target.value})} />
+              <textarea required placeholder="Tuliskan catatan kondisi area..." className="w-full px-8 py-5 rounded-[1.5rem] bg-slate-50 border-2 border-transparent outline-none font-bold text-sm min-h-[140px] focus:border-slate-900 shadow-inner" value={patrolReportData.note} onChange={e => setPatrolReportData({...patrolReportData, note: e.target.value})} />
               <button type="submit" className={`w-full py-5 text-white rounded-[2rem] font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all shadow-xl ${patrolAction.status === 'OK' ? 'bg-green-600' : 'bg-red-600'}`}>SIMPAN & SINKRON CLOUD</button>
             </form>
           </div>
@@ -710,15 +711,15 @@ const App: React.FC = () => {
               <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
             </div>
             <form onSubmit={handleSaveResident} className="p-10 space-y-6">
-              <input type="text" required placeholder="Nama Lengkap Pemilik Unit..." className="w-full px-8 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-base focus:border-slate-900 shadow-inner" value={resForm.name} onChange={e => setResForm({...resForm, name: e.target.value})} />
+              <input type="text" required placeholder="Nama Lengkap..." className="w-full px-8 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-base focus:border-slate-900 shadow-inner" value={resForm.name} onChange={e => setResForm({...resForm, name: e.target.value})} />
               <div className="grid grid-cols-2 gap-4">
                  <select className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={resForm.block} onChange={e => setResForm({...resForm, block: e.target.value})}>
                     {BLOCKS.map(b => <option key={b} value={b}>{b}</option>)}
                  </select>
                  <input type="text" required placeholder="No. Rumah" className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-slate-900 outline-none font-bold text-sm shadow-inner" value={resForm.houseNumber} onChange={e => setResForm({...resForm, houseNumber: e.target.value})} />
               </div>
-              <input type="text" required placeholder="WhatsApp (08...)" className="w-full px-8 py-5 rounded-2xl bg-slate-50 outline-none font-bold text-sm border-2 border-slate-100 focus:border-slate-900 shadow-inner" value={resForm.phoneNumber} onChange={e => setResForm({...resForm, phoneNumber: e.target.value})} />
-              <button type="submit" className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">SINKRONISASI DATA UNIT</button>
+              <input type="text" required placeholder="No. WhatsApp (08...)" className="w-full px-8 py-5 rounded-2xl bg-slate-50 outline-none font-bold text-sm border-2 border-slate-100 focus:border-slate-900 shadow-inner" value={resForm.phoneNumber} onChange={e => setResForm({...resForm, phoneNumber: e.target.value})} />
+              <button type="submit" className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">SIMPAN DATABASE CLOUD</button>
             </form>
           </div>
         </div>
