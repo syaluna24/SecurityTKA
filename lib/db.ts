@@ -3,15 +3,15 @@ import { Resident, IncidentReport, PatrolLog, GuestLog, ChatMessage, FullDatabas
 import { MOCK_RESIDENTS, MOCK_INCIDENTS, MOCK_GUESTS } from '../constants.tsx';
 
 /**
- * TKA SUPA-RELAY ENGINE (v17.0 - VERCEL/CLOUD PERSISTENCE)
- * Menghubungkan Laptop & HP secara nyata dengan sinkronisasi instan.
+ * TKA GLOBAL CLOUD ENGINE
+ * Menghubungkan Laptop & HP Satpam secara nyata.
  */
 
-const getClusterID = () => localStorage.getItem('tka_cluster_id') || 'TKA-MASTER-CLUSTER';
+const getClusterName = () => localStorage.getItem('tka_cluster_name') || 'TKA-DEFAULT-CLUSTER';
 const getBlobID = () => localStorage.getItem('tka_blob_id');
 
-// Master Seed: Data awal jika cluster baru dibuat agar tidak blank
-const INITIAL_SEED: FullDatabase = {
+// Inisialisasi Database agar aplikasi tidak blank
+const INITIAL_DATABASE: FullDatabase = {
   residents: [...MOCK_RESIDENTS],
   guests: [...MOCK_GUESTS],
   incidents: [...MOCK_INCIDENTS],
@@ -22,114 +22,113 @@ const INITIAL_SEED: FullDatabase = {
   lastUpdated: new Date().toISOString()
 };
 
-// Cloud Endpoint (Relay Storage yang mensimulasikan Vercel Postgres secara Real-time)
-const CLOUD_ENDPOINT = "https://jsonblob.com/api/jsonBlob";
+// Cloud Relay API (Simulasi Database Vercel yang bisa diakses publik)
+const RELAY_URL = "https://jsonblob.com/api/jsonBlob";
 
 export const db = {
-  getCluster: () => getClusterID(),
-
-  // Menghubungkan HP & Laptop ke saluran yang sama
-  connect: async (clusterName: string) => {
-    const id = clusterName.toUpperCase().replace(/\s/g, '');
-    localStorage.setItem('tka_cluster_id', id);
+  getCluster: () => getClusterName(),
+  
+  // Fungsi Utama: Menghubungkan HP & Laptop
+  connectCluster: async (name: string) => {
+    const clusterId = name.toUpperCase().replace(/\s/g, '');
+    localStorage.setItem('tka_cluster_name', clusterId);
     
-    // Discovery Logic: Ambil ID Cloud yang sudah ada untuk Cluster ini
-    let cloudId = localStorage.getItem(`cloud_id_${id}`);
+    // Cari apakah cluster ini sudah punya ID cloud atau buat baru
+    let blobId = localStorage.getItem(`blob_id_${clusterId}`);
     
-    if (!cloudId) {
-      try {
-        const res = await fetch(CLOUD_ENDPOINT, {
+    try {
+      if (!blobId) {
+        const res = await fetch(RELAY_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(INITIAL_SEED)
+          body: JSON.stringify(INITIAL_DATABASE)
         });
         const url = res.headers.get('Location');
         if (url) {
-          cloudId = url.split('/').pop() || '';
-          localStorage.setItem(`cloud_id_${id}`, cloudId);
+          blobId = url.split('/').pop() || '';
+          localStorage.setItem(`blob_id_${clusterId}`, blobId);
         }
-      } catch (e) {
-        console.error("Cloud Error", e);
       }
-    }
-    
-    if (cloudId) {
-      localStorage.setItem('tka_blob_id', cloudId);
-      window.location.reload();
+      
+      if (blobId) {
+        localStorage.setItem('tka_blob_id', blobId);
+        window.location.reload();
+      }
+    } catch (e) {
+      console.error("Gagal koneksi cloud database.");
     }
   },
 
-  // Tarik data terbaru dari Cloud (Real-time Fetch)
+  // Ambil Data Terbaru dari Cloud
   fetch: async (): Promise<FullDatabase> => {
-    const cloudId = getBlobID();
-    if (!cloudId) return INITIAL_SEED;
+    const id = getBlobID();
+    if (!id) return INITIAL_DATABASE;
 
     try {
-      const res = await fetch(`${CLOUD_ENDPOINT}/${cloudId}`);
+      const res = await fetch(`${RELAY_URL}/${id}`);
       if (res.ok) {
         const data = await res.json();
-        // Simpan cache lokal untuk akses instan
-        localStorage.setItem('tka_cache', JSON.stringify(data));
+        localStorage.setItem('tka_local_cache', JSON.stringify(data));
         return data;
       }
     } catch (e) {
-      console.warn("Using Local Cache...");
+      console.warn("Cloud offline, menggunakan cache lokal.");
     }
-
-    const cache = localStorage.getItem('tka_cache');
-    return cache ? JSON.parse(cache) : INITIAL_SEED;
+    
+    const cache = localStorage.getItem('tka_local_cache');
+    return cache ? JSON.parse(cache) : INITIAL_DATABASE;
   },
 
-  // Dorong data ke Cloud agar perangkat lain (HP/Laptop) langsung update
+  // Update Data ke Cloud (Agar HP & Laptop sinkron seketika)
   push: async (updateFn: (db: FullDatabase) => FullDatabase) => {
-    const cloudId = getBlobID();
+    const id = getBlobID();
     const current = await db.fetch();
     const updated = updateFn(current);
     updated.lastUpdated = new Date().toISOString();
 
-    // Optimistic UI: Update cache lokal dulu
-    localStorage.setItem('tka_cache', JSON.stringify(updated));
+    // Simpan di lokal untuk kecepatan UI
+    localStorage.setItem('tka_local_cache', JSON.stringify(updated));
 
-    if (cloudId) {
+    if (id) {
       try {
-        await fetch(`${CLOUD_ENDPOINT}/${cloudId}`, {
+        await fetch(`${RELAY_URL}/${id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(updated)
         });
       } catch (e) {
-        console.error("Push failed", e);
+        console.error("Gagal sinkronisasi cloud.");
       }
     }
     return updated;
   },
 
-  // --- API METHODS UNTUK APP ---
+  // Database Accessors
   resident: {
-    findMany: async () => (await db.fetch()).residents,
+    findMany: async () => (await db.fetch()).residents || [],
     update: async (id: string, payload: any) => 
-      db.push(d => ({ ...d, residents: d.residents.map(r => r.id === id ? {...r, ...payload} : r) })),
+      db.push(d => ({ ...d, residents: (d.residents || []).map(r => r.id === id ? {...r, ...payload} : r) })),
     create: async (payload: any) => 
-      db.push(d => ({ ...d, residents: [payload, ...d.residents] }))
+      db.push(d => ({ ...d, residents: [payload, ...(d.residents || [])] }))
   },
   incident: {
-    findMany: async () => (await db.fetch()).incidents,
+    findMany: async () => (await db.fetch()).incidents || [],
     create: async (payload: any) => 
-      db.push(d => ({ ...d, incidents: [payload, ...d.incidents] }))
+      db.push(d => ({ ...d, incidents: [payload, ...(d.incidents || [])] }))
   },
   patrol: {
-    findMany: async () => (await db.fetch()).patrolLogs,
+    findMany: async () => (await db.fetch()).patrolLogs || [],
     create: async (payload: any) => 
-      db.push(d => ({ ...d, patrolLogs: [payload, ...d.patrolLogs] }))
+      db.push(d => ({ ...d, patrolLogs: [payload, ...(d.patrolLogs || [])] }))
   },
   guest: {
-    findMany: async () => (await db.fetch()).guests,
+    findMany: async () => (await db.fetch()).guests || [],
     create: async (payload: any) => 
-      db.push(d => ({ ...d, guests: [payload, ...d.guests] }))
+      db.push(d => ({ ...d, guests: [payload, ...(d.guests || [])] }))
   },
   chat: {
-    findMany: async () => (await db.fetch()).chatMessages,
+    findMany: async () => (await db.fetch()).chatMessages || [],
     create: async (payload: any) => 
-      db.push(d => ({ ...d, chatMessages: [...d.chatMessages, payload] }))
+      db.push(d => ({ ...d, chatMessages: [...(d.chatMessages || []), payload] }))
   }
 };
