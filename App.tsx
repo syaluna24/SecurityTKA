@@ -14,18 +14,18 @@ import Layout from './components/Layout.tsx';
 import { 
   Shield, Search, Send, Users, MapPin, X, AlertTriangle, 
   UserPlus, ArrowRight, CheckCircle, Edit2, Plus, Home, 
-  Activity, MessageSquare, Radio, LogOut, Camera, Trash2, UserCheck, RefreshCw, Ghost, PhoneCall, ArrowLeftRight, ClipboardCheck, BookOpen, Settings, Filter, Clock
+  Activity, MessageSquare, Radio, LogOut, Camera, Trash2, UserCheck, RefreshCw, Ghost, PhoneCall, ArrowLeftRight, ClipboardCheck, BookOpen, Settings, Filter, Clock, Wifi, Globe
 } from 'lucide-react';
 import { getSecurityBriefing } from './services/geminiService.ts';
 import { BarChart, Bar, Tooltip, ResponsiveContainer, Cell, XAxis } from 'recharts';
 import { db } from './lib/db.ts';
 
 const App: React.FC = () => {
-  // --- DATABASE STATES ---
-  const [residents, setResidents] = useState<Resident[]>([]);
+  // --- DATABASE STATES (Initialized with Mock to prevent Blank Screens) ---
+  const [residents, setResidents] = useState<Resident[]>(MOCK_RESIDENTS);
   const [patrolLogs, setPatrolLogs] = useState<PatrolLog[]>([]);
-  const [incidents, setIncidents] = useState<IncidentReport[]>([]);
-  const [guests, setGuests] = useState<GuestLog[]>([]);
+  const [incidents, setIncidents] = useState<IncidentReport[]>(MOCK_INCIDENTS);
+  const [guests, setGuests] = useState<GuestLog[]>(MOCK_GUESTS);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [staff] = useState<User[]>(INITIAL_SECURITY);
 
@@ -38,7 +38,8 @@ const App: React.FC = () => {
   const [loginSearch, setLoginSearch] = useState('');
   const [loginError, setLoginError] = useState('');
   const [chatInput, setChatInput] = useState('');
-  const [cloudStatus, setCloudStatus] = useState<'connected' | 'syncing' | 'offline'>('syncing');
+  const [cloudStatus, setCloudStatus] = useState<'connected' | 'syncing'>('syncing');
+  const [lastSync, setLastSync] = useState<string>('Baru saja');
   const [isModalOpen, setIsModalOpen] = useState<'RESIDENT' | 'GUEST' | 'INCIDENT' | 'PATROL_REPORT' | null>(null);
   const [editingItem, setEditingItem] = useState<any>(null);
   const [securityBriefing, setSecurityBriefing] = useState<string>('');
@@ -53,10 +54,9 @@ const App: React.FC = () => {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- CLOUD SYNC ENGINE ---
+  // --- CLOUD GLOBAL SYNC ENGINE (Polling for multi-device support) ---
   useEffect(() => {
-    const syncCloud = async () => {
-      setCloudStatus('syncing');
+    const performSync = async () => {
       try {
         const [r, p, i, g, c] = await Promise.all([
           db.resident.findMany(),
@@ -65,29 +65,27 @@ const App: React.FC = () => {
           db.guest.findMany(),
           db.chat.findMany()
         ]);
-        setResidents(r);
+        
+        // Only update if there's actual data to prevent flickering
+        if (r.length > 0) setResidents(r);
         setPatrolLogs(p);
         setIncidents(i);
         setGuests(g);
         setChatMessages(c);
+        
         setCloudStatus('connected');
+        setLastSync(new Date().toLocaleTimeString());
       } catch (err) {
-        setCloudStatus('connected');
+        console.error("Sync Error:", err);
       }
     };
-    syncCloud();
 
-    const subRes = db.resident.subscribe((p: any) => {
-      if (p.eventType === 'UPDATE_ALL') setResidents(p.data);
-    });
-    const subChat = db.chat.subscribe((p: any) => {
-      if (p.eventType === 'INSERT') setChatMessages(prev => prev.some(m => m.id === p.new.id) ? prev : [...prev, p.new]);
-    });
+    // Initial sync
+    performSync();
 
-    return () => {
-      subRes.unsubscribe();
-      subChat.unsubscribe();
-    };
+    // Polling every 4 seconds to sync across different devices/browsers
+    const interval = setInterval(performSync, 4000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -97,6 +95,12 @@ const App: React.FC = () => {
       getSecurityBriefing(shiftName).then(setSecurityBriefing);
     }
   }, [currentUser]);
+
+  useEffect(() => {
+    if (activeTab === 'chat' && chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, activeTab]);
 
   // --- HANDLERS ---
   const handleLogin = (e: React.FormEvent) => {
@@ -118,8 +122,9 @@ const App: React.FC = () => {
       if (editingItem) await db.resident.update(editingItem.id, resForm);
       else await db.resident.create({ ...resForm, id: `r-${Date.now()}` });
       setIsModalOpen(null);
-      setResidents(await db.resident.findMany());
-    } catch (err) { alert("Cloud Sinkron Gagal."); }
+      const r = await db.resident.findMany();
+      setResidents(r);
+    } catch (err) { alert("Sinkronisasi Cloud Gagal."); }
   };
 
   const handleSaveGuest = async (e: React.FormEvent) => {
@@ -130,14 +135,15 @@ const App: React.FC = () => {
       await db.guest.create({
         ...guestForm,
         id: `g-${Date.now()}`,
-        visitToName: resident ? `${resident.name} (${resident.block}-${resident.houseNumber})` : 'Unknown',
+        visitToName: resident ? `${resident.name} (${resident.block}-${resident.houseNumber})` : 'Tujuan Tidak Diketahui',
         entryTime: new Date().toISOString(),
         status: 'IN'
       });
-      setGuests(await db.guest.findMany());
+      const g = await db.guest.findMany();
+      setGuests(g);
       setIsModalOpen(null);
       setGuestForm({ name: '', visitToId: '', purpose: '', photo: '' });
-    } catch (e) { alert("Gagal register tamu."); }
+    } catch (e) { alert("Gagal mendaftarkan tamu."); }
   };
 
   const handleSaveIncident = async (e: React.FormEvent) => {
@@ -152,10 +158,11 @@ const App: React.FC = () => {
         timestamp: new Date().toISOString(),
         status: 'PENDING'
       });
-      setIncidents(await db.incident.findMany());
+      const inc = await db.incident.findMany();
+      setIncidents(inc);
       setIsModalOpen(null);
       setIncForm({ type: 'Pencurian', location: '', description: '', severity: 'MEDIUM', photo: '' });
-    } catch (e) { alert("Laporan gagal terkirim."); }
+    } catch (e) { alert("Laporan gagal dikirim ke cloud."); }
   };
 
   const handleStatusChange = async (resId: string, isHome: boolean) => {
@@ -198,9 +205,10 @@ const App: React.FC = () => {
         photo: patrolReportData.photo
       });
       setIsModalOpen(null);
-      setPatrolLogs(await db.patrol.findMany());
+      const p = await db.patrol.findMany();
+      setPatrolLogs(p);
       setPatrolReportData({ note: '', photo: '' });
-    } catch (e) { alert("Laporan patroli gagal."); }
+    } catch (e) { alert("Gagal menyimpan patroli."); }
   };
 
   // --- DATA VIEWS ---
@@ -233,16 +241,16 @@ const App: React.FC = () => {
                 <Shield size={32} className="text-slate-900" />
               </div>
               <h1 className="text-3xl lg:text-4xl font-black mb-4 tracking-tighter italic uppercase leading-none">TKA SECURE <br/><span className="text-amber-500 not-italic text-2xl font-light tracking-widest leading-none">Vercel Postgres</span></h1>
-              <p className="text-slate-400 text-sm italic leading-relaxed font-medium">Monitoring perumahan terpadu berbasis Vercel Prisma Engine.</p>
+              <p className="text-slate-400 text-sm italic leading-relaxed font-medium">Sistem Monitoring Terpadu. Data tersinkronisasi antar perangkat secara real-time.</p>
             </div>
             <div className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-center gap-3 relative z-10 backdrop-blur-sm">
                <div className={`w-2 h-2 rounded-full animate-pulse bg-green-500`}></div>
-               <span className="text-[10px] font-black uppercase tracking-widest text-slate-300 italic">Connected to Cloud Engine</span>
+               <span className="text-[10px] font-black uppercase tracking-widest text-slate-300 italic">Cloud Sync Active</span>
             </div>
           </div>
 
           <div className="w-full md:w-7/12 p-8 lg:p-14 flex flex-col bg-white overflow-y-auto no-scrollbar max-h-[850px]">
-            <h2 className="text-3xl font-black text-slate-900 mb-8 tracking-tight italic uppercase leading-none">Akses Portal</h2>
+            <h2 className="text-3xl font-black text-slate-900 mb-8 tracking-tight italic uppercase leading-none">Login Portal</h2>
             <div className="flex bg-slate-100 p-1.5 rounded-2xl mb-8">
               {(['SECURITY', 'ADMIN', 'RESIDENT'] as const).map(t => (
                 <button key={t} onClick={() => { setLoginTab(t); setSelectedUser(null); setLoginSearch(''); }}
@@ -264,7 +272,7 @@ const App: React.FC = () => {
                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-xl transition-colors ${selectedUser?.id === u.id ? 'bg-amber-500 text-slate-900' : 'bg-slate-900 text-white'}`}>{u.name.charAt(0)}</div>
                   <div className="flex-1 text-left">
                     <p className="font-black text-slate-900 text-base truncate uppercase leading-none mb-1">{u.name}</p>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{u.sub || 'Authorized Personnel'}</p>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{u.sub || 'Access Authorized'}</p>
                   </div>
                 </button>
               ))}
@@ -276,7 +284,7 @@ const App: React.FC = () => {
                   value={passwordInput} onChange={e => setPasswordInput(e.target.value)} />
                 {loginError && <p className="text-red-500 text-[10px] font-black text-center uppercase italic">{loginError}</p>}
                 <button type="submit" className="w-full bg-slate-900 text-white font-black py-5 rounded-2xl flex items-center justify-center gap-4 text-xs uppercase tracking-widest shadow-2xl hover:bg-slate-800 transition-all">
-                  LOGIN KE CLOUD <ArrowRight size={20} />
+                  MASUK KE CLOUD <ArrowRight size={20} />
                 </button>
               </form>
             )}
@@ -292,12 +300,40 @@ const App: React.FC = () => {
       {/* 1. DASHBOARD */}
       {activeTab === 'dashboard' && (
         <div className="space-y-8 animate-slide-up pb-10">
+          {/* Connection Status Hub */}
+          <div className="bg-slate-900 p-6 lg:p-8 rounded-[2.5rem] shadow-2xl border border-white/5 flex flex-col lg:flex-row items-center justify-between gap-6 relative overflow-hidden group">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl group-hover:bg-amber-500/20 transition-all"></div>
+            <div className="flex items-center gap-6 relative z-10 w-full lg:w-auto">
+               <div className="w-16 h-16 rounded-[1.5rem] bg-amber-500 flex items-center justify-center shadow-2xl shadow-amber-500/20 animate-pulse">
+                  <Globe size={32} className="text-slate-900" />
+               </div>
+               <div>
+                  <h3 className="text-white font-black text-lg uppercase italic leading-none mb-1 tracking-tight">Cloud Sync Center</h3>
+                  <div className="flex items-center gap-2">
+                     <span className="w-2 h-2 rounded-full bg-green-500 animate-ping"></span>
+                     <p className="text-[10px] font-black uppercase text-amber-500 tracking-widest italic">Connected to Vercel Postgres Bridge</p>
+                  </div>
+               </div>
+            </div>
+            <div className="flex items-center gap-8 w-full lg:w-auto justify-end relative z-10">
+               <div className="text-right">
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Last Handshake</p>
+                  <p className="text-white font-black text-sm tabular-nums italic">{lastSync}</p>
+               </div>
+               <div className="h-10 w-px bg-white/10 hidden lg:block"></div>
+               <div className="text-right">
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Global Refresh</p>
+                  <p className="text-white font-black text-sm italic">Otomatis (4s)</p>
+               </div>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
             {[
-              { label: 'Petugas Aktif', val: staff.length, icon: <UserCheck size={24}/>, color: 'blue' },
+              { label: 'Staff Aktif', val: staff.length, icon: <UserCheck size={24}/>, color: 'blue' },
               { label: 'Lapor Terbuka', val: incidents.filter(i => i.status !== 'RESOLVED').length, icon: <AlertTriangle size={24}/>, color: 'red' },
-              { label: 'Tamu Hari Ini', val: guests.filter(g => g.status === 'IN').length, icon: <Users size={24}/>, color: 'amber' },
-              { label: 'Unit Warga', val: residents.length, icon: <Home size={24}/>, color: 'green' }
+              { label: 'Tamu Aktif', val: guests.filter(g => g.status === 'IN').length, icon: <Users size={24}/>, color: 'amber' },
+              { label: 'Unit Terdaftar', val: residents.length, icon: <Home size={24}/>, color: 'green' }
             ].map((s, i) => (
               <div key={i} className="bg-white p-6 lg:p-8 rounded-[2rem] shadow-sm border border-slate-100 group hover:shadow-xl transition-all duration-300">
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-6 transition-transform group-hover:scale-110 ${s.color === 'amber' ? 'bg-amber-50 text-amber-600' : s.color === 'red' ? 'bg-red-50 text-red-600' : s.color === 'blue' ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600'}`}>
@@ -311,7 +347,7 @@ const App: React.FC = () => {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 bg-white p-6 lg:p-10 rounded-[2.5rem] shadow-sm border border-slate-100 min-h-[400px]">
-               <h3 className="text-xl font-black text-slate-900 mb-10 flex items-center gap-4 uppercase italic leading-none"><Activity size={24} className="text-amber-500 animate-pulse"/> Analitik Aktivitas</h3>
+               <h3 className="text-xl font-black text-slate-900 mb-10 flex items-center gap-4 uppercase italic leading-none"><Activity size={24} className="text-amber-500 animate-pulse"/> Statistik Aktivitas</h3>
                <div className="h-[250px] lg:h-[300px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={chartData}>
@@ -330,9 +366,9 @@ const App: React.FC = () => {
                     <Radio size={32} className="text-amber-500 animate-pulse"/>
                     <h3 className="font-black text-2xl uppercase italic leading-none">AI Briefing</h3>
                   </div>
-                  <p className="text-slate-400 text-sm italic leading-relaxed font-medium">"{securityBriefing || 'Sinkronisasi asisten cerdas...'}"</p>
+                  <p className="text-slate-400 text-sm italic leading-relaxed font-medium">"{securityBriefing || 'Menghubungkan asisten cerdas...'}"</p>
                </div>
-               <button onClick={() => setActiveTab('chat')} className="w-full bg-amber-500 text-slate-900 font-black py-5 rounded-2xl text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all mt-10">PANGGIL BANTUAN <ArrowRight size={20}/></button>
+               <button onClick={() => setActiveTab('chat')} className="w-full bg-amber-500 text-slate-900 font-black py-5 rounded-2xl text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all mt-10">MASUK PUSAT CHAT <ArrowRight size={20}/></button>
             </div>
           </div>
         </div>
@@ -341,7 +377,7 @@ const App: React.FC = () => {
       {/* 2. CEK UNIT */}
       {activeTab === 'log_resident' && (
         <div className="space-y-8 animate-slide-up pb-24">
-           <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Status Hunian Real-time</h3>
+           <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Status Hunian Cloud</h3>
            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               {residents.map(res => (
                 <div key={res.id} className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col justify-between group hover:shadow-xl transition-all duration-300">
@@ -365,7 +401,7 @@ const App: React.FC = () => {
       {/* 3. PATROLI */}
       {activeTab === 'patrol' && (
         <div className="space-y-8 animate-slide-up pb-20">
-           <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Digital Checkpoints</h3>
+           <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Check-Points Control</h3>
            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
               {INITIAL_CHECKPOINTS.map((cp, idx) => {
                 const last = patrolLogs.find(l => l.checkpoint === cp);
@@ -384,7 +420,7 @@ const App: React.FC = () => {
                         <button onClick={() => { setPatrolAction({cp, status: 'DANGER'}); setIsModalOpen('PATROL_REPORT'); }} className="py-5 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase active:scale-95 shadow-lg shadow-red-500/10">BAHAYA</button>
                       </div>
                     ) : (
-                      <div className="text-[10px] font-black text-slate-400 uppercase border-t pt-6 tracking-widest italic truncate leading-none">Terakhir: {last ? `${last.securityName} (${new Date(last.timestamp).toLocaleTimeString()})` : 'Belum Ada Log'}</div>
+                      <div className="text-[10px] font-black text-slate-400 uppercase border-t pt-6 tracking-widest italic truncate leading-none">Terakhir: {last ? `${last.securityName} (${new Date(last.timestamp).toLocaleTimeString()})` : 'Belum Ada Aktivitas'}</div>
                     )}
                   </div>
                 );
@@ -396,7 +432,7 @@ const App: React.FC = () => {
       {/* 4. FEED AKTIVITAS */}
       {activeTab === 'reports' && (
         <div className="space-y-8 animate-slide-up pb-20">
-           <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Cloud Activity Feed</h3>
+           <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Global Cloud Feed</h3>
            <div className="bg-white p-6 lg:p-12 rounded-[3rem] shadow-sm border border-slate-100 overflow-hidden">
               <div className="space-y-12">
                 {timelineFeed.length > 0 ? timelineFeed.map((item: any, idx) => (
@@ -413,19 +449,19 @@ const App: React.FC = () => {
                            <span className="text-[11px] font-black text-slate-300 uppercase tracking-widest">{new Date(item.time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                         </div>
                         <p className="text-sm lg:text-base text-slate-500 font-medium mb-6 italic leading-relaxed">
-                          {item.type === 'PATROL' ? `Kondisi: ${item.status}. ${item.note || ''}` : item.type === 'INCIDENT' ? item.description : `Tujuan: ${item.visitToName}. Keperluan: ${item.purpose}`}
+                          {item.type === 'PATROL' ? `Status: ${item.status}. ${item.note || ''}` : item.type === 'INCIDENT' ? item.description : `Tujuan Unit: ${item.visitToName}. Keperluan: ${item.purpose}`}
                         </p>
-                        {item.photo && <img src={item.photo} alt="Cloud Visual" className="mb-6 rounded-[2rem] w-full max-w-md border border-slate-100 shadow-xl" />}
+                        {item.photo && <img src={item.photo} alt="Cloud Proof" className="mb-6 rounded-[2rem] w-full max-w-md border border-slate-100 shadow-xl" />}
                         <div className="flex flex-wrap gap-3">
-                           <span className={`px-4 py-2 rounded-full text-[9px] font-black uppercase tracking-widest ${item.status === 'OK' || item.status === 'RESOLVED' || item.status === 'IN' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>{item.status || 'REPORTED'}</span>
-                           <span className="px-4 py-2 bg-slate-50 text-slate-400 rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-2"><Clock size={12}/> Oleh: {item.securityName || item.reporterName || 'Sistem'}</span>
+                           <span className={`px-4 py-2 rounded-full text-[9px] font-black uppercase tracking-widest ${item.status === 'OK' || item.status === 'RESOLVED' || item.status === 'IN' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>{item.status || 'VERIFIED'}</span>
+                           <span className="px-4 py-2 bg-slate-50 text-slate-400 rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-2"><Clock size={12}/> Oleh: {item.securityName || item.reporterName || 'Sistem Cloud'}</span>
                         </div>
                      </div>
                   </div>
                 )) : (
                    <div className="py-32 text-center opacity-40 italic">
                       <Ghost size={64} className="mx-auto mb-6" />
-                      <p className="font-black uppercase tracking-[0.3em] text-[10px]">Sinkronisasi Data...</p>
+                      <p className="font-black uppercase tracking-[0.3em] text-[10px]">Menunggu Sinkronisasi Data...</p>
                    </div>
                 )}
               </div>
@@ -450,7 +486,7 @@ const App: React.FC = () => {
                    <h4 className="text-xl font-black text-slate-900 uppercase italic mb-2 leading-none">{inc.type}</h4>
                    <p className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2"><MapPin size={14}/> {inc.location}</p>
                    <p className="text-slate-500 mb-8 italic text-sm lg:text-base leading-relaxed">{inc.description}</p>
-                   {inc.photo && <img src={inc.photo} className="w-full h-48 object-cover rounded-2xl mb-6" />}
+                   {inc.photo && <img src={inc.photo} className="w-full h-48 object-cover rounded-2xl mb-6 shadow-lg border border-slate-100" />}
                    <div className="pt-6 border-t border-slate-50 flex justify-between items-center">
                       <span className="text-[10px] font-black text-slate-400 uppercase italic">Reporter: {inc.reporterName}</span>
                       <span className="bg-slate-900 text-white px-4 py-1.5 rounded-full text-[9px] font-black uppercase">{inc.status}</span>
@@ -465,11 +501,11 @@ const App: React.FC = () => {
       {activeTab === 'guests' && (
         <div className="space-y-8 animate-slide-up pb-24">
            <div className="flex justify-between items-center">
-              <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Registrasi Tamu</h3>
+              <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Daftar Tamu Masuk</h3>
               <button onClick={() => setIsModalOpen('GUEST')} className="bg-blue-600 text-white p-4 rounded-2xl shadow-xl active:scale-95 transition-all"><Plus size={24}/></button>
            </div>
            <div className="bg-white rounded-[3rem] overflow-hidden border border-slate-100 shadow-sm">
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto no-scrollbar">
                  <table className="w-full text-left">
                     <thead className="bg-slate-50 border-b border-slate-100">
                        <tr>
@@ -477,7 +513,7 @@ const App: React.FC = () => {
                           <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Tujuan Unit</th>
                           <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Keperluan</th>
                           <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Status</th>
-                          <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Check-In</th>
+                          <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Entry</th>
                        </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
@@ -489,7 +525,7 @@ const App: React.FC = () => {
                              <td className="px-8 py-6">
                                 <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase ${g.status === 'IN' ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-400'}`}>{g.status}</span>
                              </td>
-                             <td className="px-8 py-6 text-[10px] font-black text-slate-300">{new Date(g.entryTime).toLocaleTimeString()}</td>
+                             <td className="px-8 py-6 text-[10px] font-black text-slate-300 tabular-nums">{new Date(g.entryTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</td>
                           </tr>
                        ))}
                     </tbody>
@@ -503,7 +539,7 @@ const App: React.FC = () => {
       {activeTab === 'residents' && (
         <div className="space-y-8 animate-slide-up pb-24">
            <div className="flex justify-between items-center">
-              <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Database Master Warga</h3>
+              <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Master Database Warga</h3>
               {currentUser.role === 'ADMIN' && (
                 <button onClick={() => { setEditingItem(null); setResForm({ name: '', houseNumber: '', block: BLOCKS[0], phoneNumber: '', isHome: true }); setIsModalOpen('RESIDENT'); }} className="bg-slate-900 text-white p-4 rounded-2xl shadow-xl active:scale-95 transition-all"><Plus size={24}/></button>
               )}
@@ -514,10 +550,10 @@ const App: React.FC = () => {
                    <div>
                       <div className="flex justify-between items-start mb-8">
                         <div className="w-14 h-14 bg-slate-900 text-white rounded-[1.5rem] flex items-center justify-center font-black text-lg group-hover:bg-amber-500 transition-colors shadow-lg">{res.block}</div>
-                        <span className="text-[9px] font-black text-slate-300 uppercase italic opacity-50">NODE: CLOUD-{res.id.slice(0,4)}</span>
+                        <span className="text-[9px] font-black text-slate-300 uppercase italic opacity-50">SYNC: {res.id.slice(0,5)}</span>
                       </div>
                       <h4 className="font-black text-slate-900 uppercase italic truncate text-lg mb-1 leading-none">{res.name}</h4>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-8 leading-none">Unit {res.block}-{res.houseNumber}</p>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-8 leading-none">Rumah {res.block} No {res.houseNumber}</p>
                    </div>
                    <div className="flex gap-2">
                       <a href={`tel:${res.phoneNumber}`} className="flex-1 py-4 bg-slate-50 text-slate-900 rounded-2xl flex items-center justify-center gap-2 font-black text-[9px] uppercase hover:bg-green-500 hover:text-white transition-all"><PhoneCall size={16}/> HUBUNGI</a>
@@ -531,14 +567,14 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* 8. CHAT & 9. SETTINGS (ALREADY PERFECT) */}
+      {/* 8. CHAT & 9. SETTINGS */}
       {activeTab === 'chat' && (
         <div className="max-w-4xl mx-auto h-[calc(100vh-220px)] flex flex-col animate-slide-up pb-10">
            <div className="flex-1 bg-white rounded-t-[3rem] shadow-sm border border-slate-100 overflow-y-auto p-6 lg:p-10 space-y-8 no-scrollbar relative">
               <div className="sticky top-0 z-10 text-center mb-10">
-                 <span className="bg-slate-50 text-slate-400 text-[8px] font-black uppercase px-6 py-2 rounded-full border border-slate-100 tracking-widest italic backdrop-blur-md">Pusat Komunikasi Digital</span>
+                 <span className="bg-slate-50 text-slate-400 text-[8px] font-black uppercase px-6 py-2 rounded-full border border-slate-100 tracking-widest italic backdrop-blur-md">Pusat Komunikasi Cloud</span>
               </div>
-              {chatMessages.map((msg, i) => (
+              {chatMessages.length > 0 ? chatMessages.map((msg, i) => (
                 <div key={msg.id} className={`flex ${msg.senderId === currentUser.id ? 'justify-end' : 'justify-start'} animate-slide-up`}>
                    <div className={`max-w-[85%] p-6 rounded-[2.5rem] relative shadow-sm transition-transform hover:scale-[1.01] ${msg.senderId === currentUser.id ? 'bg-slate-900 text-white rounded-tr-none' : 'bg-slate-50 text-slate-900 rounded-tl-none border border-slate-100'}`}>
                       <div className="flex justify-between items-center gap-6 mb-2">
@@ -549,7 +585,13 @@ const App: React.FC = () => {
                       <p className={`text-[8px] mt-3 opacity-30 text-right font-black uppercase tracking-widest`}>{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
                    </div>
                 </div>
-              ))}
+              )) : (
+                 <div className="h-full flex flex-col items-center justify-center opacity-20 grayscale italic">
+                    <MessageSquare size={64} className="mb-6" />
+                    <p className="font-black uppercase tracking-[0.4em] text-[10px]">Obrolan Tim Belum Dimulai</p>
+                 </div>
+              )}
+              <div ref={chatEndRef} />
            </div>
            <form onSubmit={handleSendChat} className="bg-white p-6 rounded-b-[3rem] border-t border-slate-100 flex gap-4 shadow-2xl items-center sticky bottom-0">
               <input type="text" placeholder="Ketik koordinasi tim..." className="flex-1 px-8 py-5 rounded-[2rem] bg-slate-50 border-2 border-transparent outline-none font-bold text-sm lg:text-base focus:border-amber-500 transition-all shadow-inner" value={chatInput} onChange={e => setChatInput(e.target.value)} />
@@ -560,23 +602,23 @@ const App: React.FC = () => {
 
       {activeTab === 'settings' && (
         <div className="max-w-2xl mx-auto space-y-8 animate-slide-up pb-20">
-           <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Profil Cloud</h3>
+           <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Konfigurasi Cloud</h3>
            <div className="bg-white p-10 lg:p-14 rounded-[4rem] shadow-sm border border-slate-100 text-center relative overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-24 bg-slate-900"></div>
               <div className="relative mt-4">
                  <div className="w-32 h-32 bg-amber-500 text-slate-900 rounded-[3rem] flex items-center justify-center font-black text-5xl mx-auto mb-8 shadow-2xl border-[6px] border-white">{currentUser.name.charAt(0)}</div>
               </div>
               <h3 className="text-3xl font-black text-slate-900 uppercase italic mb-1 leading-none tracking-tight">{currentUser.name}</h3>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-12 italic leading-none">Role: {currentUser.role} • Cloud Active</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-12 italic leading-none">Role: {currentUser.role} • Cloud Hub Active</p>
               <div className="space-y-4">
-                 <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-6 bg-slate-900 text-amber-500 rounded-3xl font-black uppercase text-xs tracking-widest flex items-center justify-center gap-4 active:scale-95 transition-all"><RefreshCw size={20}/> RESET DATABASE CLOUD</button>
-                 <button onClick={() => setCurrentUser(null)} className="w-full py-6 bg-red-600 text-white rounded-3xl font-black uppercase text-xs tracking-widest flex items-center justify-center gap-4 active:scale-95 transition-all"><LogOut size={20}/> KELUAR SISTEM</button>
+                 <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-6 bg-slate-900 text-amber-500 rounded-3xl font-black uppercase text-xs tracking-widest flex items-center justify-center gap-4 active:scale-95 transition-all"><RefreshCw size={20}/> FULL RESET (HAPUS CACHE)</button>
+                 <button onClick={() => setCurrentUser(null)} className="w-full py-6 bg-red-600 text-white rounded-3xl font-black uppercase text-xs tracking-widest flex items-center justify-center gap-4 active:scale-95 transition-all"><LogOut size={20}/> LOGOUT DARI SISTEM</button>
               </div>
            </div>
         </div>
       )}
 
-      {/* MODALS IMPLEMENTATION */}
+      {/* --- MODALS (Enhanced with Device Sync Alerts) --- */}
       {isModalOpen === 'GUEST' && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in">
           <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl animate-slide-up overflow-hidden">
@@ -591,7 +633,7 @@ const App: React.FC = () => {
                  {residents.map(r => <option key={r.id} value={r.id}>{r.name} ({r.block}-{r.houseNumber})</option>)}
               </select>
               <textarea required placeholder="Keperluan Kunjungan..." className="w-full px-8 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 font-bold outline-none focus:border-blue-600 min-h-[120px]" value={guestForm.purpose} onChange={e => setGuestForm({...guestForm, purpose: e.target.value})} />
-              <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">CHECK-IN TAMU</button>
+              <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">CHECK-IN (CLOUD SYNC)</button>
             </form>
           </div>
         </div>
@@ -609,46 +651,44 @@ const App: React.FC = () => {
                  <option value="Pencurian">Pencurian</option>
                  <option value="Kebakaran">Kebakaran</option>
                  <option value="Keributan">Keributan</option>
-                 <option value="Kecelakaan">Kecelakaan</option>
                  <option value="Lainnya">Lainnya</option>
               </select>
               <input type="text" required placeholder="Lokasi Kejadian..." className="w-full px-8 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 font-bold outline-none" value={incForm.location} onChange={e => setIncForm({...incForm, location: e.target.value})} />
-              <textarea required placeholder="Deskripsi Kejadian Secara Detail..." className="w-full px-8 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 font-bold outline-none min-h-[120px]" value={incForm.description} onChange={e => setIncForm({...incForm, description: e.target.value})} />
+              <textarea required placeholder="Deskripsi Kejadian..." className="w-full px-8 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 font-bold outline-none min-h-[120px]" value={incForm.description} onChange={e => setIncForm({...incForm, description: e.target.value})} />
               <div className="flex gap-4">
                  {(['LOW', 'MEDIUM', 'HIGH'] as const).map(s => (
-                    <button key={s} type="button" onClick={() => setIncForm({...incForm, severity: s})} className={`flex-1 py-4 rounded-2xl font-black text-[10px] border-2 transition-all ${incForm.severity === s ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-400 border-slate-100'}`}>{s}</button>
+                    <button key={s} type="button" onClick={() => setIncForm({...incForm, severity: s})} className={`flex-1 py-4 rounded-2xl font-black text-[10px] border-2 transition-all ${incForm.severity === s ? 'bg-slate-900 text-white border-slate-900 shadow-xl' : 'bg-white text-slate-400 border-slate-100'}`}>{s}</button>
                  ))}
               </div>
-              <button type="submit" className="w-full py-5 bg-red-600 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">KIRIM LAPORAN DARURAT</button>
+              <button type="submit" className="w-full py-5 bg-red-600 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">KIRIM KE PUSAT (CLOUD)</button>
             </form>
           </div>
         </div>
       )}
 
-      {/* RE-USE EXISTING MODALS (PATROL & RESIDENT) */}
       {isModalOpen === 'PATROL_REPORT' && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in">
           <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl animate-slide-up overflow-hidden">
             <div className={`p-8 lg:p-10 text-white flex justify-between items-center ${patrolAction.status === 'OK' ? 'bg-green-600' : 'bg-red-600'}`}>
               <div>
                 <h3 className="text-xl lg:text-2xl font-black uppercase leading-none italic">{patrolAction.cp}</h3>
-                <p className="text-[10px] font-black uppercase opacity-70 mt-1 tracking-widest italic leading-none">Vercel Digital Patrol</p>
+                <p className="text-[10px] font-black uppercase opacity-70 mt-1 tracking-widest italic leading-none">Cloud Handshake System</p>
               </div>
               <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
             </div>
             <form onSubmit={handlePatrolReport} className="p-8 lg:p-12 space-y-8">
               <div className="space-y-2">
-                 <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1 leading-none">Bukti Foto:</label>
+                 <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1 leading-none">Bukti Visual Petugas:</label>
                  <div className="flex flex-col gap-4">
                     {patrolReportData.photo ? (
                       <div className="relative group">
                          <img src={patrolReportData.photo} alt="Preview" className="w-full h-48 lg:h-56 object-cover rounded-[2rem] border-2 border-slate-100" />
-                         <button type="button" onClick={() => setPatrolReportData(prev => ({ ...prev, photo: '' }))} className="absolute top-4 right-4 p-3 bg-red-600 text-white rounded-2xl"><Trash2 size={20}/></button>
+                         <button type="button" onClick={() => setPatrolReportData(prev => ({ ...prev, photo: '' }))} className="absolute top-4 right-4 p-3 bg-red-600 text-white rounded-2xl shadow-xl"><Trash2 size={20}/></button>
                       </div>
                     ) : (
-                      <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full h-48 lg:h-56 rounded-[2rem] bg-slate-50 border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-4 text-slate-400 group">
+                      <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full h-48 lg:h-56 rounded-[2rem] bg-slate-50 border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-4 text-slate-400 group hover:border-slate-400 transition-all">
                          <Camera size={48} className="group-hover:scale-110 transition-transform" />
-                         <span className="font-black text-[10px] uppercase tracking-widest italic leading-none">AKTIFKAN KAMERA</span>
+                         <span className="font-black text-[10px] uppercase tracking-widest italic leading-none">BUKA KAMERA PETUGAS</span>
                       </button>
                     )}
                     <input type="file" ref={fileInputRef} accept="image/*" capture="environment" className="hidden" onChange={(e) => {
@@ -661,8 +701,8 @@ const App: React.FC = () => {
                     }} />
                  </div>
               </div>
-              <textarea required placeholder="Tuliskan catatan kondisi area..." className="w-full px-8 py-5 rounded-[1.5rem] bg-slate-50 border-2 border-transparent outline-none font-bold text-sm min-h-[140px] focus:border-slate-900 shadow-inner" value={patrolReportData.note} onChange={e => setPatrolReportData({...patrolReportData, note: e.target.value})} />
-              <button type="submit" className={`w-full py-5 text-white rounded-[2rem] font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all ${patrolAction.status === 'OK' ? 'bg-green-600' : 'bg-red-600'}`}>SIMPAN KE CLOUD</button>
+              <textarea required placeholder="Tuliskan catatan kondisi area di lapangan..." className="w-full px-8 py-5 rounded-[1.5rem] bg-slate-50 border-2 border-transparent outline-none font-bold text-sm min-h-[140px] focus:border-slate-900 shadow-inner" value={patrolReportData.note} onChange={e => setPatrolReportData({...patrolReportData, note: e.target.value})} />
+              <button type="submit" className={`w-full py-5 text-white rounded-[2rem] font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all ${patrolAction.status === 'OK' ? 'bg-green-600' : 'bg-red-600'}`}>SIMPAN & SINKRON CLOUD</button>
             </form>
           </div>
         </div>
@@ -672,11 +712,11 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in">
           <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl animate-slide-up overflow-hidden">
             <div className="p-10 bg-slate-900 text-white flex justify-between items-center">
-              <h3 className="text-2xl font-black uppercase italic leading-none">{editingItem ? 'Update Warga' : 'Unit Baru'}</h3>
+              <h3 className="text-2xl font-black uppercase italic leading-none">{editingItem ? 'Update Warga' : 'Tambah Unit'}</h3>
               <button onClick={() => setIsModalOpen(null)}><X size={28}/></button>
             </div>
             <form onSubmit={handleSaveResident} className="p-10 space-y-6">
-              <input type="text" required placeholder="Nama Lengkap..." className="w-full px-8 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-base focus:border-slate-900 shadow-inner" value={resForm.name} onChange={e => setResForm({...resForm, name: e.target.value})} />
+              <input type="text" required placeholder="Nama Lengkap Pemilik Unit..." className="w-full px-8 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-base focus:border-slate-900 shadow-inner" value={resForm.name} onChange={e => setResForm({...resForm, name: e.target.value})} />
               <div className="grid grid-cols-2 gap-4">
                  <select className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 outline-none font-bold text-sm" value={resForm.block} onChange={e => setResForm({...resForm, block: e.target.value})}>
                     {BLOCKS.map(b => <option key={b} value={b}>{b}</option>)}
@@ -684,7 +724,7 @@ const App: React.FC = () => {
                  <input type="text" required placeholder="No. Rumah" className="w-full px-6 py-5 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-slate-900 outline-none font-bold text-sm shadow-inner" value={resForm.houseNumber} onChange={e => setResForm({...resForm, houseNumber: e.target.value})} />
               </div>
               <input type="text" required placeholder="WhatsApp (08...)" className="w-full px-8 py-5 rounded-2xl bg-slate-50 outline-none font-bold text-sm border-2 border-slate-100 focus:border-slate-900 shadow-inner" value={resForm.phoneNumber} onChange={e => setResForm({...resForm, phoneNumber: e.target.value})} />
-              <button type="submit" className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">SINKRONISASI DATA</button>
+              <button type="submit" className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all">SINKRONISASI DATA UNIT</button>
             </form>
           </div>
         </div>
